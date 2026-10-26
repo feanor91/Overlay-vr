@@ -4,6 +4,11 @@ on:
     branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version a publier (ex. 0.0.1) ; vide = simple compilation"
+        required: false
+        default: ""
 permissions:
   contents: write
 jobs:
@@ -25,7 +30,9 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
-          $v = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.TrimStart('v') } else { 'dev' }
+          $v = 'dev'
+          if ($env:GITHUB_REF -like 'refs/tags/v*') { $v = $env:GITHUB_REF_NAME.TrimStart('v') }
+          elseif ('${{ inputs.version }}' -ne '') { $v = '${{ inputs.version }}' }
           & "C:\Program Files (x86)\NSIS\makensis.exe" "/DVERSION=$v" installer/setup.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis a echoue" }
       - uses: actions/upload-artifact@v4
@@ -35,9 +42,12 @@ jobs:
             dist/
             OverlayVR-Setup-*.exe
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version != '' && format('v{0}', inputs.version) || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: OverlayVR ${{ inputs.version != '' && inputs.version || github.ref_name }}
           files: |
             OverlayVR-windows.zip
             OverlayVR-Setup-*.exe
