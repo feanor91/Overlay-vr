@@ -1,7 +1,11 @@
 name: build-windows
 on:
   push:
+    branches: ["**"]
+    tags: ["v*"]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -15,8 +19,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist | Out-Null
-          Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/OverlayVR_Editor.exe dist/
+          Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/OverlayVR_Editor.exe, README.md dist/
+          Compress-Archive -Path dist/* -DestinationPath OverlayVR-windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: OverlayVR-windows
           path: dist/
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: OverlayVR-windows.zip
+          generate_release_notes: true
+          prerelease: true
+          body: |
+            Premiere version de test (0.0.1) : zones passthrough globales pour Virtual Desktop (VDXR).
+            Non testee avec un casque a ce stade. Voir le README pour l'installation et les commandes.
