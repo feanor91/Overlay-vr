@@ -21,15 +21,26 @@ jobs:
           New-Item -ItemType Directory -Path dist | Out-Null
           Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/OverlayVR_Editor.exe, README.md dist/
           Compress-Archive -Path dist/* -DestinationPath OverlayVR-windows.zip
+      - name: Installer (NSIS)
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $v = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.TrimStart('v') } else { 'dev' }
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DVERSION=$v" installer/setup.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis a echoue" }
       - uses: actions/upload-artifact@v4
         with:
           name: OverlayVR-windows
-          path: dist/
+          path: |
+            dist/
+            OverlayVR-Setup-*.exe
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: OverlayVR-windows.zip
+          files: |
+            OverlayVR-windows.zip
+            OverlayVR-Setup-*.exe
           generate_release_notes: true
           prerelease: true
           body: |
