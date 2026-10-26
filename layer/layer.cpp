@@ -1,0 +1,488 @@
+// Couche API OpenXR implicite : ajoute des quads magenta (255,0,255) a chaque image pour les zones
+// de %APPDATA%\OverlayVR\zones.json. Virtual Desktop remplace ce magenta par le passthrough.
+// Compatible D3D11 et D3D12 (les quads ont besoin d'une swapchain que la couche remplit en magenta).
+#define NOMINMAX
+#define XR_USE_PLATFORM_WIN32
+#define XR_USE_GRAPHICS_API_D3D11
+#define XR_USE_GRAPHICS_API_D3D12
+#include <windows.h>
+#include <unknwn.h>
+#include <d3d11.h>
+#include <d3d12.h>
+
+#include <openxr/openxr.h>
+#include <openxr/openxr_platform.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
+#include "../common/mathx.h"
+#include "../common/zones.h"
+
+// --- structures de l'interface loader <-> couche (openxr/loader_interfaces.h) ------------------
+enum XrLoaderInterfaceStructs {
+    XR_LOADER_INTERFACE_STRUCT_UNINTIALIZED = 0,
+    XR_LOADER_INTERFACE_STRUCT_LOADER_INFO = 1,
+    XR_LOADER_INTERFACE_STRUCT_API_LAYER_REQUEST = 2,
+    XR_LOADER_INTERFACE_STRUCT_RUNTIME_REQUEST = 3,
+    XR_LOADER_INTERFACE_STRUCT_API_LAYER_CREATE_INFO = 4,
+    XR_LOADER_INTERFACE_STRUCT_API_LAYER_NEXT_INFO = 5,
+};
+#define XR_CURRENT_LOADER_API_LAYER_VERSION 1
+#define XR_API_LAYER_MAX_SETTINGS_PATH_SIZE 512
+
+struct XrApiLayerCreateInfo;
+typedef XrResult(XRAPI_PTR* PFN_xrCreateApiLayerInstance)(const XrInstanceCreateInfo* info,
+                                                          const XrApiLayerCreateInfo* layerInfo,
+                                                          XrInstance* instance);
+struct XrNegotiateLoaderInfo {
+    XrLoaderInterfaceStructs structType;
+    uint32_t structVersion;
+    size_t structSize;
+    uint32_t minInterfaceVersion;
+    uint32_t maxInterfaceVersion;
+    XrVersion minApiVersion;
+    XrVersion maxApiVersion;
+};
+struct XrNegotiateApiLayerRequest {
+    XrLoaderInterfaceStructs structType;
+    uint32_t structVersion;
+    size_t structSize;
+    uint32_t layerInterfaceVersion;
+    XrVersion layerApiVersion;
+    PFN_xrGetInstanceProcAddr getInstanceProcAddr;
+    PFN_xrCreateApiLayerInstance createApiLayerInstance;
+};
+struct XrApiLayerNextInfo {
+    XrLoaderInterfaceStructs structType;
+    uint32_t structVersion;
+    size_t structSize;
+    char layerName[XR_MAX_API_LAYER_NAME_SIZE];
+    PFN_xrGetInstanceProcAddr nextGetInstanceProcAddr;
+    PFN_xrCreateApiLayerInstance nextCreateApiLayerInstance;
+    XrApiLayerNextInfo* next;
+};
+struct XrApiLayerCreateInfo {
+    XrLoaderInterfaceStructs structType;
+    uint32_t structVersion;
+    size_t structSize;
+    void* loaderInstance;
+    char settings_file_location[XR_API_LAYER_MAX_SETTINGS_PATH_SIZE];
+    XrApiLayerNextInfo* nextInfo;
+};
+
+namespace {
+
+using ovm::Q;
+using ovm::V3;
+
+void logf(const char* fmt, ...) {
+    auto path = ovz::dataDir() / "layer.log";
+    FILE* f = std::fopen(path.string().c_str(), "a");
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    std::vfprintf(f, fmt, ap);
+    va_end(ap);
+    std::fputc('\n', f);
+    std::fclose(f);
+}
+
+// Fonctions de la couche suivante (autre couche ou runtime).
+struct Next {
+    PFN_xrGetInstanceProcAddr getProcAddr = nullptr;
+    PFN_xrDestroyInstance DestroyInstance = nullptr;
+    PFN_xrCreateSession CreateSession = nullptr;
+    PFN_xrDestroySession DestroySession = nullptr;
+    PFN_xrEndFrame EndFrame = nullptr;
+    PFN_xrCreateReferenceSpace CreateReferenceSpace = nullptr;
+    PFN_xrDestroySpace DestroySpace = nullptr;
+    PFN_xrLocateSpace LocateSpace = nullptr;
+    PFN_xrEnumerateSwapchainFormats EnumerateSwapchainFormats = nullptr;
+    PFN_xrCreateSwapchain CreateSwapchain = nullptr;
+    PFN_xrDestroySwapchain DestroySwapchain = nullptr;
+    PFN_xrEnumerateSwapchainImages EnumerateSwapchainImages = nullptr;
+    PFN_xrAcquireSwapchainImage AcquireSwapchainImage = nullptr;
+    PFN_xrWaitSwapchainImage WaitSwapchainImage = nullptr;
+    PFN_xrReleaseSwapchainImage ReleaseSwapchainImage = nullptr;
+} nx;
+
+enum class Api { None, D3D11, D3D12 };
+constexpr int32_t kSwapchainSize = 16;
+
+struct State {
+    bool disabled = false;
+    XrInstance instance = XR_NULL_HANDLE;
+    XrSession session = XR_NULL_HANDLE;
+    Api api = Api::None;
+    ID3D11Device* d3d11 = nullptr;
+    ID3D12Device* d3d12 = nullptr;
+    ID3D12CommandQueue* queue = nullptr;
+    XrSpace stage = XR_NULL_HANDLE;
+    XrSpace view = XR_NULL_HANDLE;
+    XrSwapchain swapchain = XR_NULL_HANDLE;
+    int64_t format = 0;
+    bool swapchainTried = false;
+    bool swapchainReady = false;
+    std::vector<ovz::Zone> zones;
+    FILETIME zonesStamp = {};
+    ULONGLONG lastCheck = 0;
+} g;
+
+// --- zones (rechargees a chaud) -------------------------------------------------------------
+void refreshZones() {
+    ULONGLONG now = GetTickCount64();
+    if (now - g.lastCheck < 500) return;
+    g.lastCheck = now;
+    auto path = ovz::zonesPath();
+    WIN32_FILE_ATTRIBUTE_DATA attr;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attr)) {
+        g.zones.clear();
+        g.zonesStamp = {};
+        return;
+    }
+    if (CompareFileTime(&attr.ftLastWriteTime, &g.zonesStamp) == 0) return;
+    g.zonesStamp = attr.ftLastWriteTime;
+    if (ovz::loadZones(path, g.zones)) logf("%zu zone(s) chargee(s)", g.zones.size());
+}
+
+// --- swapchain magenta ----------------------------------------------------------------------
+bool clearD3D11(const XrSwapchainImageD3D11KHR& img) {
+    ID3D11RenderTargetView* rtv = nullptr;
+    D3D11_RENDER_TARGET_VIEW_DESC desc = {};
+    desc.Format = static_cast<DXGI_FORMAT>(g.format);
+    desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    if (FAILED(g.d3d11->CreateRenderTargetView(img.texture, &desc, &rtv))) return false;
+    ID3D11DeviceContext* ctx = nullptr;
+    g.d3d11->GetImmediateContext(&ctx);
+    const float magenta[4] = {1, 0, 1, 1};
+    ctx->ClearRenderTargetView(rtv, magenta);
+    ctx->Flush();
+    ctx->Release();
+    rtv->Release();
+    return true;
+}
+
+bool clearD3D12(const XrSwapchainImageD3D12KHR& img) {
+    ID3D12DescriptorHeap* heap = nullptr;
+    ID3D12CommandAllocator* alloc = nullptr;
+    ID3D12GraphicsCommandList* list = nullptr;
+    ID3D12Fence* fence = nullptr;
+    bool ok = false;
+    D3D12_DESCRIPTOR_HEAP_DESC hd = {};
+    hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    hd.NumDescriptors = 1;
+    if (SUCCEEDED(g.d3d12->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap))) &&
+        SUCCEEDED(g.d3d12->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))) &&
+        SUCCEEDED(g.d3d12->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, nullptr,
+                                             IID_PPV_ARGS(&list))) &&
+        SUCCEEDED(g.d3d12->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
+        D3D12_RENDER_TARGET_VIEW_DESC rd = {};
+        rd.Format = static_cast<DXGI_FORMAT>(g.format);
+        rd.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        D3D12_CPU_DESCRIPTOR_HANDLE h = heap->GetCPUDescriptorHandleForHeapStart();
+        g.d3d12->CreateRenderTargetView(img.texture, &rd, h);
+        const float magenta[4] = {1, 0, 1, 1};
+        list->ClearRenderTargetView(h, magenta, 0, nullptr);  // l'image est deja en RENDER_TARGET
+        list->Close();
+        ID3D12CommandList* lists[] = {list};
+        g.queue->ExecuteCommandLists(1, lists);
+        HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (ev && SUCCEEDED(g.queue->Signal(fence, 1)) && SUCCEEDED(fence->SetEventOnCompletion(1, ev))) {
+            WaitForSingleObject(ev, 2000);
+            ok = true;
+        }
+        if (ev) CloseHandle(ev);
+    }
+    if (fence) fence->Release();
+    if (list) list->Release();
+    if (alloc) alloc->Release();
+    if (heap) heap->Release();
+    return ok;
+}
+
+bool createMagentaSwapchain() {
+    uint32_t n = 0;
+    nx.EnumerateSwapchainFormats(g.session, 0, &n, nullptr);
+    std::vector<int64_t> formats(n);
+    nx.EnumerateSwapchainFormats(g.session, n, &n, formats.data());
+    // UNORM d'abord : le magenta sort exactement a (255,0,255) ; le sRGB convient aussi pour 0 et 1.
+    const int64_t preferred[] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM,
+                                 DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB};
+    g.format = 0;
+    for (int64_t p : preferred)
+        if (std::find(formats.begin(), formats.end(), p) != formats.end()) {
+            g.format = p;
+            break;
+        }
+    if (!g.format) return false;
+
+    XrSwapchainCreateInfo ci = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+    ci.format = g.format;
+    ci.sampleCount = 1;
+    ci.width = ci.height = kSwapchainSize;
+    ci.faceCount = 1;
+    ci.arraySize = 1;
+    ci.mipCount = 1;
+    if (XR_FAILED(nx.CreateSwapchain(g.session, &ci, &g.swapchain))) return false;
+
+    uint32_t count = 0;
+    nx.EnumerateSwapchainImages(g.swapchain, 0, &count, nullptr);
+    std::vector<XrSwapchainImageD3D11KHR> img11;
+    std::vector<XrSwapchainImageD3D12KHR> img12;
+    if (g.api == Api::D3D11) {
+        img11.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+        nx.EnumerateSwapchainImages(g.swapchain, count, &count,
+                                    reinterpret_cast<XrSwapchainImageBaseHeader*>(img11.data()));
+    } else {
+        img12.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
+        nx.EnumerateSwapchainImages(g.swapchain, count, &count,
+                                    reinterpret_cast<XrSwapchainImageBaseHeader*>(img12.data()));
+    }
+
+    uint32_t index = 0;
+    XrSwapchainImageAcquireInfo ai = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    if (XR_FAILED(nx.AcquireSwapchainImage(g.swapchain, &ai, &index))) return false;
+    XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wi.timeout = XR_INFINITE_DURATION;
+    if (XR_FAILED(nx.WaitSwapchainImage(g.swapchain, &wi))) return false;
+    bool ok = g.api == Api::D3D11 ? clearD3D11(img11[index]) : clearD3D12(img12[index]);
+    XrSwapchainImageReleaseInfo ri = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    nx.ReleaseSwapchainImage(g.swapchain, &ri);
+    return ok;
+}
+
+bool ensureSwapchain() {
+    if (g.swapchainReady) return true;
+    if (g.swapchainTried) return false;
+    g.swapchainTried = true;
+    g.swapchainReady = createMagentaSwapchain();
+    logf("swapchain magenta : %s", g.swapchainReady ? "ok" : "echec");
+    return g.swapchainReady;
+}
+
+// --- generation des quads ---------------------------------------------------------------------
+struct Face {
+    Q rot;
+    V3 off;
+    float w, h;
+};
+
+XrPosef toXr(V3 p, Q q) {
+    XrPosef x;
+    x.position = {p.x, p.y, p.z};
+    x.orientation = {q.x, q.y, q.z, q.w};
+    return x;
+}
+
+void addZoneQuads(const ovz::Zone& z, bool haveHead, V3 head, std::vector<XrCompositionLayerQuad>& out) {
+    const float hp = ovm::kPi / 2;
+    const float w = z.size[0], h = z.size[1], d = z.size[2];
+    std::vector<Face> faces;
+    if (z.type == ovz::ZoneType::Plane) {
+        faces.push_back({ovm::qaxis('x', -hp), {0, 0, 0}, w, d});  // face vers le haut
+        faces.push_back({ovm::qaxis('x', hp), {0, 0, 0}, w, d});   // face vers le bas
+    } else {
+        faces.push_back({Q{}, {0, 0, d / 2}, w, h});
+        faces.push_back({ovm::qaxis('y', 2 * hp), {0, 0, -d / 2}, w, h});
+        faces.push_back({ovm::qaxis('y', hp), {w / 2, 0, 0}, d, h});
+        faces.push_back({ovm::qaxis('y', -hp), {-w / 2, 0, 0}, d, h});
+        faces.push_back({ovm::qaxis('x', -hp), {0, h / 2, 0}, w, d});
+        faces.push_back({ovm::qaxis('x', hp), {0, -h / 2, 0}, w, d});
+    }
+    Q yaw = ovm::qaxis('y', z.yaw);
+    V3 center = {z.pos[0], z.pos[1], z.pos[2]};
+    for (const Face& f : faces) {
+        Q q = ovm::qmul(yaw, f.rot);
+        V3 pos = center + ovm::qrot(yaw, f.off);
+        // On ne garde que les faces tournees vers la tete : 3 quads par volume au plus.
+        if (haveHead && ovm::dot(ovm::qrot(q, V3{0, 0, 1}), head - pos) <= 0) continue;
+        XrCompositionLayerQuad quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+        quad.layerFlags = 0;
+        quad.space = g.stage;
+        quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        quad.subImage.swapchain = g.swapchain;
+        quad.subImage.imageRect = {{0, 0}, {kSwapchainSize, kSwapchainSize}};
+        quad.subImage.imageArrayIndex = 0;
+        quad.pose = toXr(pos, q);
+        quad.size = {std::max(f.w, 0.001f), std::max(f.h, 0.001f)};
+        out.push_back(quad);
+    }
+}
+
+// --- fonctions interceptees -------------------------------------------------------------------
+XrResult XRAPI_CALL ovCreateSession(XrInstance instance, const XrSessionCreateInfo* info, XrSession* session) {
+    XrResult res = nx.CreateSession(instance, info, session);
+    if (XR_FAILED(res) || g.disabled) return res;
+
+    g.api = Api::None;
+    for (auto p = static_cast<const XrBaseInStructure*>(info->next); p; p = p->next) {
+        if (p->type == XR_TYPE_GRAPHICS_BINDING_D3D11_KHR) {
+            g.d3d11 = reinterpret_cast<const XrGraphicsBindingD3D11KHR*>(p)->device;
+            g.api = Api::D3D11;
+        } else if (p->type == XR_TYPE_GRAPHICS_BINDING_D3D12_KHR) {
+            auto b = reinterpret_cast<const XrGraphicsBindingD3D12KHR*>(p);
+            g.d3d12 = b->device;
+            g.queue = b->queue;
+            g.api = Api::D3D12;
+        }
+    }
+    if (g.api == Api::None) {
+        logf("API graphique non prise en charge (ni D3D11 ni D3D12) : couche inactive");
+        return res;
+    }
+
+    g.session = *session;
+    g.swapchain = XR_NULL_HANDLE;
+    g.swapchainTried = g.swapchainReady = false;
+
+    XrReferenceSpaceCreateInfo rs = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    rs.poseInReferenceSpace.orientation.w = 1;
+    rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+    if (XR_FAILED(nx.CreateReferenceSpace(g.session, &rs, &g.stage))) {
+        logf("espace STAGE indisponible, repli sur LOCAL (les zones peuvent etre decalees)");
+        rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+        nx.CreateReferenceSpace(g.session, &rs, &g.stage);
+    }
+    rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    nx.CreateReferenceSpace(g.session, &rs, &g.view);
+    logf("session creee (%s)", g.api == Api::D3D11 ? "D3D11" : "D3D12");
+    return res;
+}
+
+XrResult XRAPI_CALL ovDestroySession(XrSession session) {
+    if (session == g.session) {
+        if (g.swapchain) nx.DestroySwapchain(g.swapchain);
+        if (g.stage) nx.DestroySpace(g.stage);
+        if (g.view) nx.DestroySpace(g.view);
+        g.swapchain = XR_NULL_HANDLE;
+        g.stage = XR_NULL_HANDLE;
+        g.view = XR_NULL_HANDLE;
+        g.session = XR_NULL_HANDLE;
+        g.api = Api::None;
+    }
+    return nx.DestroySession(session);
+}
+
+XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
+    if (g.disabled || session != g.session || g.api == Api::None) return nx.EndFrame(session, info);
+
+    refreshZones();
+    if (g.zones.empty() || !ensureSwapchain()) return nx.EndFrame(session, info);
+
+    // Pose de la tete dans le repere STAGE, pour l'affichage conditionnel et le choix des faces.
+    XrSpaceLocation loc = {XR_TYPE_SPACE_LOCATION};
+    constexpr XrSpaceLocationFlags need = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    bool haveHead = XR_SUCCEEDED(nx.LocateSpace(g.view, g.stage, info->displayTime, &loc)) &&
+                    (loc.locationFlags & need) == need;
+    V3 head = {loc.pose.position.x, loc.pose.position.y, loc.pose.position.z};
+    float pitchDown = 0;
+    if (haveHead) {
+        Q q = {loc.pose.orientation.x, loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w};
+        float fy = ovm::qrot(q, V3{0, 0, -1}).y;
+        pitchDown = std::asin(std::clamp(-fy, -1.0f, 1.0f)) * 180.0f / ovm::kPi;
+    }
+
+    std::vector<XrCompositionLayerQuad> quads;
+    quads.reserve(g.zones.size() * 3 + 8);
+    for (const ovz::Zone& z : g.zones) {
+        if (!z.enabled) continue;
+        if (z.look > 0 && haveHead && pitchDown < z.look) continue;
+        addZoneQuads(z, haveHead, head, quads);
+    }
+    if (quads.empty()) return nx.EndFrame(session, info);
+
+    std::vector<const XrCompositionLayerBaseHeader*> layers(info->layers, info->layers + info->layerCount);
+    for (auto& q : quads) layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q));
+    XrFrameEndInfo modified = *info;
+    modified.layerCount = static_cast<uint32_t>(layers.size());
+    modified.layers = layers.data();
+    return nx.EndFrame(session, &modified);
+}
+
+XrResult XRAPI_CALL ovDestroyInstance(XrInstance instance) {
+    XrResult r = nx.DestroyInstance(instance);
+    g.instance = XR_NULL_HANDLE;
+    return r;
+}
+
+XrResult XRAPI_CALL ovGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function) {
+    if (!nx.getProcAddr) return XR_ERROR_HANDLE_INVALID;
+    if (!g.disabled) {
+        if (!std::strcmp(name, "xrCreateSession")) {
+            *function = reinterpret_cast<PFN_xrVoidFunction>(ovCreateSession);
+            return XR_SUCCESS;
+        }
+        if (!std::strcmp(name, "xrDestroySession")) {
+            *function = reinterpret_cast<PFN_xrVoidFunction>(ovDestroySession);
+            return XR_SUCCESS;
+        }
+        if (!std::strcmp(name, "xrEndFrame")) {
+            *function = reinterpret_cast<PFN_xrVoidFunction>(ovEndFrame);
+            return XR_SUCCESS;
+        }
+    }
+    if (!std::strcmp(name, "xrDestroyInstance")) {
+        *function = reinterpret_cast<PFN_xrVoidFunction>(ovDestroyInstance);
+        return XR_SUCCESS;
+    }
+    return nx.getProcAddr(instance, name, function);
+}
+
+template <typename T>
+void fetch(XrInstance instance, const char* name, T& fn) {
+    nx.getProcAddr(instance, name, reinterpret_cast<PFN_xrVoidFunction*>(&fn));
+}
+
+XrResult XRAPI_CALL ovCreateApiLayerInstance(const XrInstanceCreateInfo* info, const XrApiLayerCreateInfo* layerInfo,
+                                             XrInstance* instance) {
+    if (!layerInfo || !layerInfo->nextInfo) return XR_ERROR_INITIALIZATION_FAILED;
+    XrApiLayerCreateInfo next = *layerInfo;
+    next.nextInfo = layerInfo->nextInfo->next;
+    XrResult res = layerInfo->nextInfo->nextCreateApiLayerInstance(info, &next, instance);
+    if (XR_FAILED(res)) return res;
+
+    nx.getProcAddr = layerInfo->nextInfo->nextGetInstanceProcAddr;
+    g.instance = *instance;
+    // L'editeur positionne cette variable pour ne pas se dessiner deux fois.
+    g.disabled = std::getenv("OVERLAYVR_DISABLE") != nullptr;
+
+    fetch(*instance, "xrDestroyInstance", nx.DestroyInstance);
+    fetch(*instance, "xrCreateSession", nx.CreateSession);
+    fetch(*instance, "xrDestroySession", nx.DestroySession);
+    fetch(*instance, "xrEndFrame", nx.EndFrame);
+    fetch(*instance, "xrCreateReferenceSpace", nx.CreateReferenceSpace);
+    fetch(*instance, "xrDestroySpace", nx.DestroySpace);
+    fetch(*instance, "xrLocateSpace", nx.LocateSpace);
+    fetch(*instance, "xrEnumerateSwapchainFormats", nx.EnumerateSwapchainFormats);
+    fetch(*instance, "xrCreateSwapchain", nx.CreateSwapchain);
+    fetch(*instance, "xrDestroySwapchain", nx.DestroySwapchain);
+    fetch(*instance, "xrEnumerateSwapchainImages", nx.EnumerateSwapchainImages);
+    fetch(*instance, "xrAcquireSwapchainImage", nx.AcquireSwapchainImage);
+    fetch(*instance, "xrWaitSwapchainImage", nx.WaitSwapchainImage);
+    fetch(*instance, "xrReleaseSwapchainImage", nx.ReleaseSwapchainImage);
+    logf("couche chargee%s", g.disabled ? " (desactivee par OVERLAYVR_DISABLE)" : "");
+    return XR_SUCCESS;
+}
+
+}  // namespace
+
+extern "C" __declspec(dllexport) XrResult XRAPI_CALL xrNegotiateLoaderApiLayerInterface(
+    const XrNegotiateLoaderInfo* loaderInfo, const char* /*layerName*/, XrNegotiateApiLayerRequest* request) {
+    if (!loaderInfo || !request || loaderInfo->structType != XR_LOADER_INTERFACE_STRUCT_LOADER_INFO ||
+        request->structType != XR_LOADER_INTERFACE_STRUCT_API_LAYER_REQUEST)
+        return XR_ERROR_INITIALIZATION_FAILED;
+    if (loaderInfo->minInterfaceVersion > XR_CURRENT_LOADER_API_LAYER_VERSION ||
+        loaderInfo->maxInterfaceVersion < XR_CURRENT_LOADER_API_LAYER_VERSION)
+        return XR_ERROR_INITIALIZATION_FAILED;
+    request->layerInterfaceVersion = XR_CURRENT_LOADER_API_LAYER_VERSION;
+    request->layerApiVersion = XR_CURRENT_API_VERSION;
+    request->getInstanceProcAddr = ovGetInstanceProcAddr;
+    request->createApiLayerInstance = ovCreateApiLayerInstance;
+    return XR_SUCCESS;
+}

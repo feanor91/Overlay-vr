@@ -1,0 +1,22 @@
+name: build-windows
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/OverlayVR_Editor.exe dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OverlayVR-windows
+          path: dist/
