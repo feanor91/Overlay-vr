@@ -33,7 +33,13 @@ jobs:
           $v = 'dev'
           if ($env:GITHUB_REF -like 'refs/tags/v*') { $v = $env:GITHUB_REF_NAME.TrimStart('v') }
           elseif ('${{ inputs.version }}' -ne '') { $v = '${{ inputs.version }}' }
-          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DVERSION=$v" installer/setup.nsi
+          $mk = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $mk) {
+            $mk = @("C:\Program Files (x86)\NSIS\makensis.exe", "C:\Program Files\NSIS\makensis.exe") |
+                  Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $mk) { throw "makensis introuvable apres l'installation de NSIS" }
+          & $mk "/DVERSION=$v" installer/setup.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis a echoue" }
       - uses: actions/upload-artifact@v4
         with:
