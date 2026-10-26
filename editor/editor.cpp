@@ -10,6 +10,11 @@
 //   X (gauche)        annule la derniere zone creee
 //   Y (gauche)        active/desactive l'affichage conditionnel (regard >= 25 degres vers le bas)
 //   Menu (gauche)     quitte
+// Objets deplacables (clavier, HOTAS...) :
+//   Clic stick gauche   change l'objet actif (blanc = aucun, orange / vert / violet) ; la couleur du bout
+//                       de la manette gauche l'indique, et les nouvelles zones lui appartiennent
+//   Gachette gauche     rattache la zone touchee a l'objet actif
+//   Grip gauche         attrape tout l'objet (toutes ses zones) et le deplace/tourne d'un bloc
 #define NOMINMAX
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
@@ -46,6 +51,21 @@ constexpr float kLookDegrees = 25.0f;
 constexpr float kTriggerOn = 0.6f;
 constexpr float kGrabMargin = 0.08f;
 constexpr float kEdge = 0.01f;
+constexpr int kObjects = 4;  // 0 = fixe dans la piece, 1..3 = objets deplacables (clavier, HOTAS...)
+const float kObjectColor[kObjects][3] = {{1, 1, 1}, {1.0f, 0.5f, 0.0f}, {0.3f, 1.0f, 0.3f}, {0.75f, 0.45f, 1.0f}};
+
+std::string objectName(int i) { return i > 0 ? "objet" + std::to_string(i) : ""; }
+int objectIndex(const std::string& name) {
+    for (int i = 1; i < kObjects; i++)
+        if (name == objectName(i)) return i;
+    return 0;
+}
+
+// Cap (rotation autour de Y) d'une pose : direction de visee -Z projetee sur le plan horizontal.
+float headingOf(ovm::Q q) {
+    ovm::V3 f = ovm::qrot(q, ovm::V3{0, 0, -1});
+    return std::atan2(-f.x, -f.z);
+}
 
 [[noreturn]] void fail(const char* what, XrResult r = XR_SUCCESS) {
     char msg[256];
@@ -240,7 +260,7 @@ private:
     XrSession session_ = XR_NULL_HANDLE;
     XrSpace stage_ = XR_NULL_HANDLE, view_ = XR_NULL_HANDLE;
     XrActionSet set_ = XR_NULL_HANDLE;
-    XrAction trigger_{}, squeeze_{}, stick_{}, pose_{}, btnA_{}, btnB_{}, btnX_{}, btnY_{}, menu_{};
+    XrAction trigger_{}, squeeze_{}, stick_{}, pose_{}, btnA_{}, btnB_{}, btnX_{}, btnY_{}, menu_{}, thumbClick_{};
     Hand hands_[2];  // 0 = gauche, 1 = droite
     std::vector<EyeSwapchain> eyes_;
     std::vector<XrViewConfigurationView> viewConfigs_;
@@ -262,6 +282,18 @@ private:
     int lastCreated_ = -1;
     int counter_ = 1;
     bool prevTrigger_ = false, prevSqueeze_ = false, prevA_ = false, prevB_ = false, prevX_ = false, prevY_ = false;
+    // Objets deplacables : tout un groupe de zones suit la manette gauche.
+    int curObject_ = 0;
+    bool prevLTrig_ = false, prevLSqueeze_ = false, prevThumb_ = false;
+    int grabObject_ = 0;
+    V3 objHand0_;
+    float objHeading0_ = 0;
+    struct Saved {
+        size_t index;
+        V3 pos;
+        float yaw;
+    };
+    std::vector<Saved> objSaved_;
     std::chrono::steady_clock::time_point lastFrame_ = std::chrono::steady_clock::now();
     Q headRot_;
     V3 headPos_;
@@ -364,6 +396,7 @@ private:
         btnX_ = makeAction("x", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
         btnY_ = makeAction("y", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
         menu_ = makeAction("menu", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+        thumbClick_ = makeAction("thumbclick", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
 
         std::vector<XrActionSuggestedBinding> b;
         auto bind = [&](XrAction a, const char* p) { b.push_back({a, path(p)}); };
@@ -379,6 +412,7 @@ private:
         bind(btnX_, "/user/hand/left/input/x/click");
         bind(btnY_, "/user/hand/left/input/y/click");
         bind(menu_, "/user/hand/left/input/menu/click");
+        bind(thumbClick_, "/user/hand/left/input/thumbstick/click");
         XrInteractionProfileSuggestedBinding sb = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
         sb.interactionProfile = path("/interaction_profiles/oculus/touch_controller");
         sb.countSuggestedBindings = static_cast<uint32_t>(b.size());
@@ -538,6 +572,66 @@ private:
         return best;
     }
 
+    // Main gauche : choix de l'objet actif, assignation, et deplacement rigide d'un objet entier.
+    void updateObjects() {
+        const Hand& lh = hands_[0];
+        bool thumb = boolState(thumbClick_);
+        bool ltrig = floatState(trigger_, 0) > kTriggerOn;
+        bool lsq = floatState(squeeze_, 0) > kTriggerOn;
+
+        if (thumb && !prevThumb_) {
+            curObject_ = (curObject_ + 1) % kObjects;
+            if (curObject_ == 0) std::printf("Objet actif : aucun (zones fixes dans la piece)\n");
+            else std::printf("Objet actif : %s (les nouvelles zones lui appartiennent)\n", objectName(curObject_).c_str());
+        }
+        if (lh.tracked) {
+            if (ltrig && !prevLTrig_) {  // rattache la zone touchee a l'objet actif
+                int target = nearestZone(lh.pos);
+                if (target >= 0) {
+                    zones_[target].object = objectName(curObject_);
+                    save();
+                    std::printf("Zone '%s' -> %s\n", zones_[target].name.c_str(),
+                                curObject_ ? objectName(curObject_).c_str() : "fixe");
+                }
+            }
+            if (lsq && !prevLSqueeze_) {  // attrape l'objet de la zone la plus proche
+                int target = nearestZone(lh.pos);
+                grabObject_ = target >= 0 ? objectIndex(zones_[target].object) : 0;
+                if (grabObject_ > 0) {
+                    objSaved_.clear();
+                    for (size_t i = 0; i < zones_.size(); i++)
+                        if (objectIndex(zones_[i].object) == grabObject_)
+                            objSaved_.push_back({i, {zones_[i].pos[0], zones_[i].pos[1], zones_[i].pos[2]}, zones_[i].yaw});
+                    objHand0_ = lh.pos;
+                    objHeading0_ = headingOf(lh.rot);
+                }
+            }
+            if (grabObject_ > 0) {
+                if (lsq) {
+                    // Transformation rigide : rotation autour de la main (cap) + translation de la main.
+                    float dyaw = headingOf(lh.rot) - objHeading0_;
+                    Q rot = ovm::qaxis('y', dyaw);
+                    for (const Saved& sv : objSaved_) {
+                        if (sv.index >= zones_.size()) continue;
+                        V3 np = lh.pos + ovm::qrot(rot, sv.pos - objHand0_);
+                        Zone& z = zones_[sv.index];
+                        z.pos[0] = np.x;
+                        z.pos[1] = np.y;
+                        z.pos[2] = np.z;
+                        z.yaw = sv.yaw + dyaw;
+                    }
+                } else {
+                    save();
+                    std::printf("%s repositionne\n", objectName(grabObject_).c_str());
+                    grabObject_ = 0;
+                }
+            }
+        }
+        prevThumb_ = thumb;
+        prevLTrig_ = ltrig;
+        prevLSqueeze_ = lsq;
+    }
+
     void updateInteraction(float dt) {
         const Hand& rh = hands_[1];
         if (boolState(menu_)) quit_ = true;
@@ -557,6 +651,8 @@ private:
             save();
             std::printf("Derniere zone annulee\n");
         }
+
+        updateObjects();
 
         if (rh.tracked) {
             // Dessin : de l'angle A (appui) a l'angle B (position courante), aligne sur le regard.
@@ -585,6 +681,7 @@ private:
                                      (mode_ == ZoneType::Plane || preview_.size[1] > 0.03f);
                     if (big) {
                         preview_.name = (mode_ == ZoneType::Plane ? "plan" : "volume") + std::to_string(counter_++);
+                        preview_.object = objectName(curObject_);
                         zones_.push_back(preview_);
                         lastCreated_ = static_cast<int>(zones_.size()) - 1;
                         save();
@@ -657,9 +754,11 @@ private:
         for (size_t i = 0; i < zones_.size(); i++) {
             const Zone& z = zones_[i];
             bool plane = z.type == ZoneType::Plane;
+            const int obj = objectIndex(z.object);
+            const float objEdge[4] = {kObjectColor[obj][0], kObjectColor[obj][1], kObjectColor[obj][2], 1};
             const float* edge = static_cast<int>(i) == grabbed_ ? hot : static_cast<int>(i) == hovered_ ? white
-                                                               : plane ? edgeYellow : edgeCyan;
-            drawZone(rend_, z, plane ? yellow : cyan, edge);
+                                : obj > 0 ? objEdge : plane ? edgeYellow : edgeCyan;
+            drawZone(rend_, z, obj > 0 ? kObjectColor[obj] : plane ? yellow : cyan, edge);
             if (z.look > 0) {  // petit repere blanc au-dessus : affichage conditionnel actif
                 const float mark[4] = {1, 1, 1, 0.9f};
                 rend_.box(boxWorld({z.pos[0], z.pos[1] + (plane ? 0.05f : z.size[1] / 2 + 0.05f), z.pos[2]}, 0, {0.04f, 0.04f, 0.04f}), mark);
@@ -670,11 +769,14 @@ private:
             const float pe[4] = {0.4f, 1.0f, 0.4f, 1};
             drawZone(rend_, preview_, pc, pe);
         }
-        for (const Hand& h : hands_) {
+        for (int hi = 0; hi < 2; hi++) {
+            const Hand& h = hands_[hi];
             if (!h.tracked) continue;
             const float body[4] = {0.5f, 0.5f, 0.5f, 1};
-            const float tip[4] = {mode_ == ZoneType::Box ? 0.0f : 1.0f, mode_ == ZoneType::Box ? 0.9f : 0.9f,
-                                  mode_ == ZoneType::Box ? 1.0f : 0.0f, 1};
+            // Droite : couleur du mode (cyan volume / jaune plan). Gauche : couleur de l'objet actif.
+            const float tip[4] = {hi == 1 ? (mode_ == ZoneType::Box ? 0.0f : 1.0f) : kObjectColor[curObject_][0],
+                                  hi == 1 ? 0.9f : kObjectColor[curObject_][1],
+                                  hi == 1 ? (mode_ == ZoneType::Box ? 1.0f : 0.0f) : kObjectColor[curObject_][2], 1};
             Mat4 pose = ovm::mFromPose(h.pos, h.rot);
             rend_.box(ovm::mmul(pose, ovm::mmul(ovm::mTranslate({0, 0, 0.05f}), ovm::mScale({0.012f, 0.012f, 0.10f}))), body);
             rend_.box(ovm::mmul(pose, ovm::mScale({0.025f, 0.025f, 0.025f})), tip);

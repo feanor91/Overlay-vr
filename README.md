@@ -38,6 +38,21 @@ Deux programmes, un seul fichier de zones (`%APPDATA%\OverlayVR\zones.json`) :
 | Affichage conditionnel | Y (gauche) : la zone n'apparaît que si tu regardes au moins 25° vers le bas (repère blanc au-dessus) |
 | Quitter | Menu (gauche) |
 
+### Objets déplaçables (clavier, HOTAS…)
+
+Une zone peut appartenir à un **objet** (`objet1` à `objet3`, champ `object` du JSON). Tout l'objet se déplace d'un bloc,
+de sorte que tu peux dessiner les zones là où le matériel est au repos, puis les recaler quand tu le remets en place.
+
+| Action | Commande |
+|---|---|
+| Choisir l'objet actif | Clic du stick gauche : blanc = aucun (fixe), orange, vert, violet. Le bout de la manette gauche prend la couleur, les nouvelles zones appartiennent à cet objet |
+| Rattacher une zone existante | Gâchette gauche sur la zone (à l'objet actif ; blanc = la rendre fixe) |
+| Déplacer / tourner tout l'objet | Grip gauche près d'une de ses zones, puis bouge la main : toutes les zones suivent d'un bloc |
+
+Remise en place : lance l'éditeur, regarde ton clavier réel à travers le passthrough, attrape l'objet au grip gauche et
+glisse-le jusqu'à ce qu'il recouvre le vrai clavier. Tu le fais une fois à chaque installation du matériel ; il n'y a pas de
+suivi automatique, rien n'est lu pendant le jeu.
+
 Le fichier `zones.json` est modifiable à la main (`pos`, `size` en mètres, `yaw` en radians, `look` en degrés).
 
 ## Limites et points à valider casque sur la tête
