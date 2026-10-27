@@ -46,21 +46,11 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 |---|---|
 | Annuler | X (n'importe quelle action, plusieurs fois de suite) ; **maintenu 2 s : tout effacer** (X annule aussi ça) |
 | Affichage conditionnel | Y sur la zone visée : visible seulement si tu regardes au moins 25° vers le bas (repère blanc au-dessus) |
-| Objet actif | Stick ◄► : aucun (blanc), orange, vert, violet ; les nouvelles zones lui appartiennent |
-| Rattacher une zone à l'objet actif (et au jeu actif) | Gâchette gauche sur la zone visée (prise en compte au **relâchement**) |
-| Déplacer une zone | Grip gauche (ou droit) sur la zone visée : **cette zone seulement**, même si elle appartient à un objet |
-| Déplacer un objet entier | **Gâchette gauche tenue** puis grip gauche sur une de ses zones : toutes les zones du même objet suivent d'un bloc |
+| Déplacer une zone | Grip gauche (ou droit) sur la zone visée, puis bouge la main et tourne le poignet |
+| Rattacher une zone au jeu actif | Gâchette gauche sur la zone visée (prise en compte au **relâchement**) |
+| Choisir le jeu actif | Stick gauche ▲▼ (tous les jeux, MSFS, Assetto Corsa…) |
 | **Recaler toutes les zones** (elles sont toutes décalées) | Grip gauche **dans le vide** (laser sur aucune zone) : toutes les zones suivent ta main d'un bloc, poignet compris ; pendant ce geste, stick droit ◄► pour tourner finement, ▲▼ pour avancer/reculer |
 | Aide / quitter | Clic du stick : masque l'aide, ou la ré-affiche **devant toi** (les panneaux restent fixes dans la pièce, ils ne suivent pas la tête) ; Menu : quitter |
-
-### Objets déplaçables (clavier, HOTAS…)
-
-Une zone peut appartenir à un **objet** (`objet1` à `objet3`, champ `object` du JSON). Tout l'objet se déplace d'un bloc :
-dessine les zones là où le matériel est au repos, puis recale-les quand tu le remets en place. Lance l'éditeur, regarde ton
-clavier réel à travers le passthrough, attrape l'objet au grip gauche et glisse-le jusqu'à ce qu'il le recouvre. Il n'y a pas
-de suivi automatique : rien n'est lu pendant le jeu.
-
-Le fichier `zones.json` est modifiable à la main (`pos`, `size` en mètres, `yaw` en radians, `look` en degrés).
 
 ## Choisir les jeux concernés
 
@@ -130,7 +120,7 @@ autorisés. Les jeux qui ont un profil sont autorisés automatiquement. Pour un 
 Dans l'éditeur :
 - **Stick gauche ▲▼** : choisit le **jeu actif** (« tous les jeux » ou un profil). Les nouvelles zones lui appartiennent ; les zones des autres jeux
   s'affichent en gris et ne sont pas sélectionnables.
-- **Gâchette gauche** sur une zone visée : la rattache à l'**objet actif et au jeu actif**.
+- **Gâchette gauche** sur une zone visée : la rattache au **jeu actif**.
 
 ## Application de la barre d'état
 

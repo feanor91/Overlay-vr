@@ -49,16 +49,6 @@ namespace {
 constexpr float kLookDegrees = 25.0f;
 constexpr float kTriggerOn = 0.6f;
 constexpr float kPickMargin = 0.04f;  // tolerance de visee autour d'une zone (surtout pour les plans)
-constexpr int kObjects = 4;  // 0 = fixe dans la piece, 1..3 = objets deplacables (clavier, HOTAS...)
-const float kObjectColor[kObjects][4] = {{1, 1, 1, 1}, {1.0f, 0.5f, 0.0f, 1}, {0.3f, 1.0f, 0.3f, 1}, {0.75f, 0.45f, 1.0f, 1}};
-const wchar_t* const kObjectLabel[kObjects] = {L"aucun (blanc)", L"objet 1 (orange)", L"objet 2 (vert)", L"objet 3 (violet)"};
-
-std::string objectName(int i) { return i > 0 ? "objet" + std::to_string(i) : ""; }
-int objectIndex(const std::string& name) {
-    for (int i = 1; i < kObjects; i++)
-        if (name == objectName(i)) return i;
-    return 0;
-}
 
 std::wstring widen(const std::string& s) {
     if (s.empty()) return L"";
@@ -162,10 +152,8 @@ private:
     V3 hit_;                  // point vise sur ce plan (main droite)
     bool hasHit_ = false;
     int counter_ = 1;
-    int curObject_ = 0;
     std::vector<std::string> profileNames_ = {std::string()};
     int curProfile_ = 0, prevFlickY_ = 0;
-    bool suppressAssign_ = false;
 
     // Lasers : une visee par main (0 = gauche, 1 = droite).
     V3 rayOrigin_[2], rayDir_[2];
@@ -184,9 +172,8 @@ private:
     };
     struct Inputs {
         Edge trigR, gripR, a, b, thumbR, trigL, gripL, x, y, thumbL;
-        float stickLx = 0, stickLy = 0;
+        float stickLy = 0;
     } in_;
-    int prevFlick_ = 0;
     float xHold_ = 0;
     bool xCleared_ = false;
 
@@ -609,23 +596,22 @@ private:
         in_.x.set(boolState(btnX_));
         in_.y.set(boolState(btnY_));
         in_.thumbL.set(boolState(thumbClick_));
-        stickState(0, in_.stickLx, in_.stickLy);
+        float lx;
+        stickState(0, lx, in_.stickLy);
         if (boolState(menu_)) quit_ = true;
     }
 
-    // group : toute la famille (meme objet) ; sinon seulement la zone visee. zoneIndex < 0 : toutes les zones.
-    void startGrab(int hand, int zoneIndex, bool group) {
+    // Saisie : la seule zone visee ; zoneIndex < 0 : toutes les zones du jeu actif (recalage d'ensemble).
+    void startGrab(int hand, int zoneIndex) {
         pushHistory();
         grab_ = Grab{};
         grab_.active = true;
         grab_.hand = hand;
         grab_.hand0 = hands_[hand].pos;
         grab_.heading0 = headingOf(hands_[hand].aimRot);
-        const std::string obj = zoneIndex >= 0 ? zones_[zoneIndex].object : std::string();
         for (size_t i = 0; i < zones_.size(); i++) {
             // Main gauche : tout l'objet. Main droite : la seule zone visee.
-            // Par defaut la seule zone visee. Tout l'objet : seulement avec la gachette gauche tenue. TOUTES les zones : grip gauche dans le vide.
-            const bool take = zoneIndex < 0 ? !otherProfile(zones_[i]) : (group && !obj.empty()) ? zones_[i].object == obj : static_cast<int>(i) == zoneIndex;
+            const bool take = zoneIndex < 0 ? !otherProfile(zones_[i]) : static_cast<int>(i) == zoneIndex;
             if (!take) continue;
             const Zone& z = zones_[i];
             grab_.items.push_back({i, {z.pos[0], z.pos[1], z.pos[2]}, z.yaw, {z.size[0], z.size[1], z.size[2]}});
@@ -719,7 +705,6 @@ private:
     void commitPreview() {
         pushHistory();
         preview_.name = (mode_ == ZoneType::Plane ? "plan" : "volume") + std::to_string(counter_++);
-        preview_.object = objectName(curObject_);
         preview_.profile = activeProfile();
         zones_.push_back(preview_);
         save();
@@ -827,9 +812,6 @@ private:
                 surfaceDirty_ = false;
             }
         }
-        const int flick = in_.stickLx > 0.7f ? 1 : in_.stickLx < -0.7f ? -1 : 0;
-        if (flick != 0 && flick != prevFlick_) curObject_ = (curObject_ + flick + kObjects) % kObjects;
-        prevFlick_ = flick;
         const int flickY = in_.stickLy > 0.7f ? 1 : in_.stickLy < -0.7f ? -1 : 0;
         if (flickY != 0 && flickY != prevFlickY_ && phase_ == Phase::Idle && !grab_.active && profileNames_.size() > 1) {
             const int n = static_cast<int>(profileNames_.size());
@@ -866,12 +848,8 @@ private:
                 hover_[1] = -1;
                 save();
             }
-            if (in_.gripR.down() && hover_[1] >= 0 && rh.tracked && rh.aimTracked) startGrab(1, hover_[1], false);
-            if (in_.gripL.down() && lh.tracked && lh.aimTracked && (hover_[0] >= 0 || !zones_.empty())) {
-                const bool group = in_.trigL.now;  // gachette gauche tenue = tout l'objet de la zone visee
-                startGrab(0, hover_[0], group || hover_[0] < 0);  // dans le vide : toutes les zones
-                if (group) suppressAssign_ = true;
-            }
+            if (in_.gripR.down() && hover_[1] >= 0 && rh.tracked && rh.aimTracked) startGrab(1, hover_[1]);
+            if (in_.gripL.down() && lh.tracked && lh.aimTracked && (hover_[0] >= 0 || !zones_.empty())) startGrab(0, hover_[0]);  // dans le vide : toutes
             if (in_.y.down() && hover_[0] >= 0) {  // affichage conditionnel de la zone visee
                 pushHistory();
                 Zone& z = zones_[hover_[0]];
@@ -879,14 +857,10 @@ private:
                 save();
             }
         }
-        if (in_.trigL.up()) {  // rattacher la zone visee a l'objet et au jeu actifs (sauf si la gachette servait a saisir un objet)
-            if (!suppressAssign_ && phase_ == Phase::Idle && !grab_.active && hover_[0] >= 0) {
-                pushHistory();
-                zones_[hover_[0]].object = objectName(curObject_);
-                zones_[hover_[0]].profile = activeProfile();
-                save();
-            }
-            suppressAssign_ = false;
+        if (in_.trigL.up() && phase_ == Phase::Idle && !grab_.active && hover_[0] >= 0) {  // rattacher la zone visee au jeu actif
+            pushHistory();
+            zones_[hover_[0]].profile = activeProfile();
+            save();
         }
         if (in_.thumbR.down() && rh.tracked) {  // manette posee sur le bureau + clic = hauteur du plan de visee
             surfaceY_ = rh.pos.y;
@@ -914,7 +888,6 @@ private:
         if (index < 0 || index >= static_cast<int>(zones_.size())) return L"—";
         const Zone& z = zones_[index];
         std::wstring s = widen(z.name);
-        if (!z.object.empty()) s += L"  [" + widen(z.object) + L"]";
         s += z.profile.empty() ? L"  {tous les jeux}" : L"  {" + widen(z.profile) + L"}";
         if (z.look > 0) s += L"  (visible en regardant vers le bas)";
         return s;
@@ -938,14 +911,14 @@ private:
         std::snprintf(buf, sizeof buf, "%d zone(s)   |   bureau à %.2f m", static_cast<int>(zones_.size()), surfaceY_);
         status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : L"VOLUME") + L"   |   Jeu actif : " +
                               (curProfile_ == 0 ? std::wstring(L"tous les jeux") : widen(activeProfile())),
-                          std::wstring(L"Objet actif : ") + kObjectLabel[curObject_] + L"   |   " + widen(buf),
+                          widen(buf),
                           hint,
                           L"Zone visée : " + zoneLabel(hover_[1] >= 0 ? hover_[1] : hover_[0])});
         if (!showHelp_) return;
         help_.setLines({
             L"#MAIN DROITE",
             L"Gâchette : tracer (1er bord, largeur, puis haut et bas de la boîte)",
-            L"Grip tenu sur une zone visée : la déplacer SEULE ; tourne le poignet",
+            L"Grip tenu sur une zone visée : la déplacer ; tourne le poignet",
             L"     pour l'orienter ; stick ◄► tourne, ▲▼ taille ; stick gauche ▲▼ hauteur",
             L"B sur une zone visée : la supprimer",
             L"A : volume / plan        Stick ▲▼ : monter/descendre le plan de visée",
@@ -953,10 +926,9 @@ private:
             L"#MAIN GAUCHE",
             L"X : annuler (maintenu 2 s : tout effacer)",
             L"Y sur une zone visée : visible seulement en regardant en bas",
-            L"Stick ◄► : objet actif (aucun, orange, vert, violet)",
             L"Stick ▲▼ : jeu actif (les nouvelles zones lui appartiennent)",
-            L"Gâchette (relâchée) sur une zone visée : la rattacher à l'objet et au jeu actifs",
-            L"Grip + gâchette tenue sur une zone d'un objet : déplacer tout l'objet",
+            L"Gâchette (relâchée) sur une zone visée : la rattacher au jeu actif",
+            L"Grip tenu sur une zone visée : la déplacer",
             L"Grip tenu dans le vide : déplacer TOUTES les zones (recalage) ;",
             L"     stick droit pendant ce geste : ◄► tourne fin, ▲▼ avance/recule",
             L"Clic stick : masquer / replacer l'aide devant toi         Menu : quitter",
@@ -968,7 +940,6 @@ private:
         const float cyan[4] = {0.1f, 0.85f, 1, 1}, yellow[4] = {1, 0.9f, 0.0f, 1}, white[4] = {1, 1, 1, 1}, green[4] = {0.2f, 1, 0.2f, 1};
         for (size_t i = 0; i < zones_.size(); i++) {
             const Zone& z = zones_[i];
-            const int obj = objectIndex(z.object);
             const bool plane = z.type == ZoneType::Plane;
             const bool hovered = static_cast<int>(i) == hover_[0] || static_cast<int>(i) == hover_[1];
             if (otherProfile(z)) {
@@ -976,7 +947,7 @@ private:
                 drawZone(rend_, z, grey, 0.008f);
                 continue;
             }
-            const float* col = isGrabbed(i) ? green : hovered ? white : obj > 0 ? kObjectColor[obj] : plane ? yellow : cyan;
+            const float* col = isGrabbed(i) ? green : hovered ? white : plane ? yellow : cyan;
             drawZone(rend_, z, col, hovered || isGrabbed(i) ? 0.025f : 0.012f);
             if (z.look > 0) {  // repere blanc au-dessus : affichage conditionnel actif
                 rend_.box(boxWorld({z.pos[0], z.pos[1] + (plane ? 0.06f : z.size[1] / 2 + 0.06f), z.pos[2]}, 0, {0.05f, 0.05f, 0.05f}), white);
@@ -992,7 +963,8 @@ private:
             float len = 2.5f;
             if (hover_[i] >= 0) len = hoverT_[i];
             else if (i == 1 && hasHit_) len = ovm::length(hit_ - rayOrigin_[1]);
-            const float* col = i == 1 ? rightCol : kObjectColor[curObject_];
+            const float leftCol[4] = {0.85f, 0.85f, 0.85f, 1};
+            const float* col = i == 1 ? rightCol : leftCol;
             rend_.box(ovm::mmul(ovm::mFromPose(rayOrigin_[i] + rayDir_[i] * (len / 2), hands_[i].aimRot),
                                 ovm::mScale({0.008f, 0.008f, len})), col);
             rend_.box(boxWorld(rayOrigin_[i] + rayDir_[i] * len, 0, {0.04f, 0.04f, 0.04f}), white);
