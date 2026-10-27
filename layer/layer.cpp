@@ -18,6 +18,8 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "../common/mathx.h"
@@ -135,6 +137,7 @@ struct State {
     ULONGLONG lastCheck = 0;
     ovz::Config cfg;
     std::string exeName, appName;
+    std::unordered_map<std::string, bool> gazeShown;  // hysteresis : zone actuellement affichee ou non
     bool active = true;  // reglages utilisateur : la couche dessine-t-elle dans ce jeu ?
 } g;
 
@@ -302,6 +305,7 @@ XrPosef toXr(V3 p, Q q) {
 
 void addZoneQuads(const ovz::Zone& z, bool haveHead, V3 head, std::vector<XrCompositionLayerQuad>& out) {
     const float hp = ovm::kPi / 2;
+    const float grow = g.cfg.overlapCm / 100.0f;  // recouvrement : supprime les lignes aux raccords des faces
     const float w = z.size[0], h = z.size[1], d = z.size[2];
     std::vector<Face> faces;
     if (z.type == ovz::ZoneType::Plane) {
@@ -330,7 +334,7 @@ void addZoneQuads(const ovz::Zone& z, bool haveHead, V3 head, std::vector<XrComp
         quad.subImage.imageRect = {{0, 0}, {kSwapchainSize, kSwapchainSize}};
         quad.subImage.imageArrayIndex = 0;
         quad.pose = toXr(pos, q);
-        quad.size = {std::max(f.w, 0.001f), std::max(f.h, 0.001f)};
+        quad.size = {std::max(f.w + grow, 0.001f), std::max(f.h + grow, 0.001f)};
         out.push_back(quad);
     }
 }
@@ -389,6 +393,26 @@ XrResult XRAPI_CALL ovDestroySession(XrSession session) {
     return nx.DestroySession(session);
 }
 
+// Vrai si la zone est dans la direction du regard (tete). Marge de 8 degres une fois affichee pour eviter le clignotement.
+bool inGaze(const ovz::Zone& z, V3 head, V3 fwd) {
+    const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
+    const V3 d = c - head;
+    const float dist = ovm::length(d);
+    const float radius = 0.5f * std::sqrt(z.size[0] * z.size[0] + z.size[1] * z.size[1] + z.size[2] * z.size[2]);
+    bool shown = g.gazeShown[z.name];
+    bool visible;
+    if (dist <= radius) {
+        visible = true;  // la tete est dans la zone
+    } else {
+        const float cosA = std::clamp(ovm::dot(fwd, d * (1.0f / dist)), -1.0f, 1.0f);
+        const float angle = std::acos(cosA) * 180.0f / ovm::kPi;
+        const float angRadius = std::asin(std::min(1.0f, radius / dist)) * 180.0f / ovm::kPi;
+        visible = angle - angRadius < g.cfg.gazeAngle + (shown ? 8.0f : 0.0f);
+    }
+    g.gazeShown[z.name] = visible;
+    return visible;
+}
+
 XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     if (g.disabled || session != g.session || g.api == Api::None) return nx.EndFrame(session, info);
 
@@ -402,9 +426,11 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
                     (loc.locationFlags & need) == need;
     V3 head = {loc.pose.position.x, loc.pose.position.y, loc.pose.position.z};
     float pitchDown = 0;
+    V3 fwd = {0, 0, -1};
     if (haveHead) {
         Q q = {loc.pose.orientation.x, loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w};
-        float fy = ovm::qrot(q, V3{0, 0, -1}).y;
+        fwd = ovm::qrot(q, V3{0, 0, -1});
+        float fy = fwd.y;
         pitchDown = std::asin(std::clamp(-fy, -1.0f, 1.0f)) * 180.0f / ovm::kPi;
     }
 
@@ -413,6 +439,7 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     for (const ovz::Zone& z : g.zones) {
         if (!z.enabled) continue;
         if (z.look > 0 && haveHead && pitchDown < z.look) continue;
+        if (g.cfg.gazeOnly && haveHead && !inGaze(z, head, fwd)) continue;
         addZoneQuads(z, haveHead, head, quads);
     }
     if (quads.empty()) return nx.EndFrame(session, info);

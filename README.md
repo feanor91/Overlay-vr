@@ -80,6 +80,17 @@ La couche est chargée par tous les jeux OpenXR, mais elle ne **dessine** que da
 | `mode: "blocklist"` | Tous les jeux sauf ceux listés |
 | `mode: "all"` | Tous les jeux |
 
+Autres réglages du même fichier :
+
+| Réglage | Effet |
+|---|---|
+| `gaze_only: true` (défaut) | Une zone n'apparaît que **quand tu la regardes** (direction de la tête, pas de suivi des yeux) ; `false` : toujours visibles |
+| `gaze_angle: 25` | Angle en degrés autour du regard (compté depuis le bord de la zone). Plus grand = apparaît plus tôt |
+| `edge_overlap_cm: 2` | Recouvrement des faces d'un volume : cache les lignes roses aux raccords. À augmenter si des lignes restent |
+
+Les fins liserés roses qui peuvent rester sur le contour des fenêtres viennent du mélange magenta/image sur les bords (et de la
+compression vidéo). Si ça te gêne, augmente la tolérance de la couleur du chroma key dans Virtual Desktop.
+
 Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Journal de la couche ») : la ligne
 `couche chargée dans XXX.exe` donne le nom exact à copier dans `apps` (le nom de l'application OpenXR marche aussi).
 
