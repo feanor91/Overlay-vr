@@ -3,7 +3,9 @@
 // et on dessine les zones avec les manettes. Tout est enregistre dans zones.json.
 //
 // Commandes (manettes Touch) :
-//   Gachette droite   maintenue : dessine une zone en tirant de l'angle A a l'angle opposé B
+//   Laser droit       vise le plan du bureau (hauteur reglable : pose la manette sur le bureau, clic du stick droit)
+//   Gachette droite   maintenue : dessine l'emprise de l'angle A a l'angle opposé B (au laser).
+//                     Plan : cree au relachement. Volume : leve la main pour la hauteur, gachette pour valider, B annule
 //   A (droite)        bascule entre VOLUME (cyan, HOTAS/manettes) et PLAN (jaune, clavier/souris)
 //   Grip droit        attrape la zone la plus proche ; stick droit : X tourne, Y agrandit/reduit
 //   B (droite)        supprime la zone attrapee
@@ -50,7 +52,7 @@ namespace {
 constexpr float kLookDegrees = 25.0f;
 constexpr float kTriggerOn = 0.6f;
 constexpr float kGrabMargin = 0.08f;
-constexpr float kEdge = 0.01f;
+constexpr float kEdge = 0.025f;  // aretes bien epaisses : visibles meme a 2-3 m
 constexpr int kObjects = 4;  // 0 = fixe dans la piece, 1..3 = objets deplacables (clavier, HOTAS...)
 const float kObjectColor[kObjects][3] = {{1, 1, 1}, {1.0f, 0.5f, 0.0f}, {0.3f, 1.0f, 0.3f}, {0.75f, 0.45f, 1.0f}};
 
@@ -185,7 +187,7 @@ void drawZone(Renderer& r, const Zone& z, const float faceRgb[3], const float ed
     const bool plane = z.type == ZoneType::Plane;
     const V3 size = {z.size[0], plane ? 0.004f : z.size[1], z.size[2]};
     const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
-    const float face[4] = {faceRgb[0], faceRgb[1], faceRgb[2], 0.30f};
+    const float face[4] = {faceRgb[0], faceRgb[1], faceRgb[2], 0.40f};
     r.box(boxWorld(c, z.yaw, size), face);
 
     // Aretes : fines barres positionnees dans le repere de la zone.
@@ -222,6 +224,10 @@ struct Hand {
     bool tracked = false;
     V3 pos;
     Q rot;
+    XrSpace aimSpace = XR_NULL_HANDLE;  // pose de visee (laser)
+    bool aimTracked = false;
+    V3 aimPos;
+    Q aimRot;
 };
 
 struct EyeSwapchain {
@@ -238,6 +244,7 @@ public:
     void run() {
         SetEnvironmentVariableA("OVERLAYVR_DISABLE", "1");  // la couche globale ne doit pas s'ajouter ici
         ovz::loadZones(ovz::zonesPath(), zones_);
+        loadSettings();
         std::printf("OverlayVR editeur - %zu zone(s) chargee(s) depuis %s\n", zones_.size(),
                     ovz::zonesPath().string().c_str());
         initOpenXR();
@@ -260,7 +267,7 @@ private:
     XrSession session_ = XR_NULL_HANDLE;
     XrSpace stage_ = XR_NULL_HANDLE, view_ = XR_NULL_HANDLE;
     XrActionSet set_ = XR_NULL_HANDLE;
-    XrAction trigger_{}, squeeze_{}, stick_{}, pose_{}, btnA_{}, btnB_{}, btnX_{}, btnY_{}, menu_{}, thumbClick_{};
+    XrAction trigger_{}, squeeze_{}, stick_{}, pose_{}, btnA_{}, btnB_{}, btnX_{}, btnY_{}, menu_{}, thumbClick_{}, aim_{}, thumbClickR_{};
     Hand hands_[2];  // 0 = gauche, 1 = droite
     std::vector<EyeSwapchain> eyes_;
     std::vector<XrViewConfigurationView> viewConfigs_;
@@ -272,10 +279,17 @@ private:
 
     std::vector<Zone> zones_;
     ZoneType mode_ = ZoneType::Box;
-    bool drawing_ = false;
-    V3 anchor_;
+    // Dessin en deux temps : emprise sur le plan du bureau (laser), puis hauteur pour un volume.
+    enum class Phase { Idle, Footprint, Height };
+    Phase phase_ = Phase::Idle;
+    bool drawing_ = false;  // phase_ != Idle
+    V3 anchor_, corner_;
     float drawYaw_ = 0;
+    float heightRefY_ = 0, heightAdj_ = 0;
     Zone preview_;
+    float surfaceY_ = 0.75f;  // hauteur du plan de visee (bureau), reglable au clic du stick droit
+    V3 rayOrigin_, rayDir_, hit_;
+    bool hasHit_ = false;
     int grabbed_ = -1;
     V3 grabOffset_;
     int hovered_ = -1;
@@ -284,6 +298,7 @@ private:
     bool prevTrigger_ = false, prevSqueeze_ = false, prevA_ = false, prevB_ = false, prevX_ = false, prevY_ = false;
     // Objets deplacables : tout un groupe de zones suit la manette gauche.
     int curObject_ = 0;
+    bool prevThumbR_ = false;
     bool prevLTrig_ = false, prevLSqueeze_ = false, prevThumb_ = false;
     int grabObject_ = 0;
     V3 objHand0_;
@@ -397,6 +412,8 @@ private:
         btnY_ = makeAction("y", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
         menu_ = makeAction("menu", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
         thumbClick_ = makeAction("thumbclick", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+        thumbClickR_ = makeAction("thumbclickr", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+        aim_ = makeAction("aim", XR_ACTION_TYPE_POSE_INPUT, true);
 
         std::vector<XrActionSuggestedBinding> b;
         auto bind = [&](XrAction a, const char* p) { b.push_back({a, path(p)}); };
@@ -406,6 +423,7 @@ private:
             bind(squeeze_, (s + "squeeze/value").c_str());
             bind(stick_, (s + "thumbstick").c_str());
             bind(pose_, (s + "grip/pose").c_str());
+            bind(aim_, (s + "aim/pose").c_str());
         }
         bind(btnA_, "/user/hand/right/input/a/click");
         bind(btnB_, "/user/hand/right/input/b/click");
@@ -413,6 +431,7 @@ private:
         bind(btnY_, "/user/hand/left/input/y/click");
         bind(menu_, "/user/hand/left/input/menu/click");
         bind(thumbClick_, "/user/hand/left/input/thumbstick/click");
+        bind(thumbClickR_, "/user/hand/right/input/thumbstick/click");
         XrInteractionProfileSuggestedBinding sb = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
         sb.interactionProfile = path("/interaction_profiles/oculus/touch_controller");
         sb.countSuggestedBindings = static_cast<uint32_t>(b.size());
@@ -425,6 +444,8 @@ private:
             asc.subactionPath = h.path;
             asc.poseInActionSpace.orientation.w = 1;
             CHK(xrCreateActionSpace(session_, &asc, &h.space));
+            asc.action = aim_;
+            CHK(xrCreateActionSpace(session_, &asc, &h.aimSpace));
         }
         XrSessionActionSetsAttachInfo att = {XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
         att.countActionSets = 1;
@@ -548,6 +569,12 @@ private:
                 h.pos = {l.pose.position.x, l.pose.position.y, l.pose.position.z};
                 h.rot = {l.pose.orientation.x, l.pose.orientation.y, l.pose.orientation.z, l.pose.orientation.w};
             }
+            XrSpaceLocation al = {XR_TYPE_SPACE_LOCATION};
+            h.aimTracked = XR_SUCCEEDED(xrLocateSpace(h.aimSpace, stage_, time, &al)) && (al.locationFlags & need) == need;
+            if (h.aimTracked) {
+                h.aimPos = {al.pose.position.x, al.pose.position.y, al.pose.position.z};
+                h.aimRot = {al.pose.orientation.x, al.pose.orientation.y, al.pose.orientation.z, al.pose.orientation.w};
+            }
         }
         XrSpaceLocation l = {XR_TYPE_SPACE_LOCATION};
         if (XR_SUCCEEDED(xrLocateSpace(view_, stage_, time, &l)) && (l.locationFlags & need) == need) {
@@ -570,6 +597,65 @@ private:
             }
         }
         return best;
+    }
+
+    void buildPreview(float height) {
+        const bool plane = mode_ == ZoneType::Plane;
+        V3 d = ovm::qrot(ovm::qaxis('y', -drawYaw_), corner_ - anchor_);
+        preview_ = Zone{};
+        preview_.type = mode_;
+        preview_.yaw = drawYaw_;
+        preview_.size[0] = std::fabs(d.x);
+        preview_.size[2] = std::fabs(d.z);
+        preview_.size[1] = plane ? 0.0f : height;
+        V3 c = anchor_ + ovm::qrot(ovm::qaxis('y', drawYaw_), V3{d.x / 2, plane ? 0.0f : height / 2, d.z / 2});
+        preview_.pos[0] = c.x;
+        preview_.pos[1] = c.y;
+        preview_.pos[2] = c.z;
+    }
+
+    void cancelDrawing() {
+        phase_ = Phase::Idle;
+        drawing_ = false;
+    }
+
+    void commitPreview() {
+        preview_.name = (mode_ == ZoneType::Plane ? "plan" : "volume") + std::to_string(counter_++);
+        preview_.object = objectName(curObject_);
+        zones_.push_back(preview_);
+        lastCreated_ = static_cast<int>(zones_.size()) - 1;
+        save();
+        std::printf("Zone '%s' creee : %.2f x %.2f x %.2f m (%zu au total)\n", preview_.name.c_str(), preview_.size[0],
+                    preview_.size[1], preview_.size[2], zones_.size());
+        cancelDrawing();
+    }
+
+    // Laser de la main droite : intersection avec le plan horizontal y = surfaceY_.
+    void updateRay() {
+        const Hand& rh = hands_[1];
+        hasHit_ = false;
+        if (!rh.aimTracked) return;
+        rayOrigin_ = rh.aimPos;
+        rayDir_ = ovm::qrot(rh.aimRot, V3{0, 0, -1});
+        if (rayDir_.y > -0.02f) return;  // vise vers le haut ou l'horizon : pas de point
+        float t = (surfaceY_ - rayOrigin_.y) / rayDir_.y;
+        if (t < 0.05f || t > 8.0f) return;
+        hit_ = rayOrigin_ + rayDir_ * t;
+        hasHit_ = true;
+    }
+
+    void loadSettings() {
+        std::ifstream f(ovz::dataDir() / "editor.json");
+        if (!f) return;
+        try {
+            surfaceY_ = nlohmann::json::parse(f).value("surface_y", surfaceY_);
+        } catch (...) {
+        }
+    }
+    void saveSettings() {
+        std::error_code ec;
+        std::filesystem::create_directories(ovz::dataDir(), ec);
+        std::ofstream(ovz::dataDir() / "editor.json") << nlohmann::json{{"surface_y", surfaceY_}}.dump(2);
     }
 
     // Main gauche : choix de l'objet actif, assignation, et deplacement rigide d'un objet entier.
@@ -653,40 +739,51 @@ private:
         }
 
         updateObjects();
+        updateRay();
+        bool thumbR = boolState(thumbClickR_);
+        if (thumbR && !prevThumbR_ && rh.tracked) {  // manette posee sur le bureau + clic = hauteur du plan de visee
+            surfaceY_ = rh.pos.y;
+            saveSettings();
+            std::printf("Hauteur du plan de visee : %.2f m\n", surfaceY_);
+        }
+        prevThumbR_ = thumbR;
 
         if (rh.tracked) {
-            // Dessin : de l'angle A (appui) a l'angle B (position courante), aligne sur le regard.
-            if (trig && !prevTrigger_ && grabbed_ < 0) {
+            // Dessin : le laser vise le plan du bureau ; gachette maintenue = emprise de A a B.
+            // Plan : cree au relachement. Volume : on releve ensuite la main pour fixer la hauteur,
+            // puis gachette pour valider (B annule).
+            if (trig && !prevTrigger_ && grabbed_ < 0 && phase_ == Phase::Idle && hasHit_) {
+                phase_ = Phase::Footprint;
                 drawing_ = true;
-                anchor_ = rh.pos;
+                anchor_ = corner_ = hit_;
                 V3 f = ovm::qrot(headRot_, V3{0, 0, -1});
                 drawYaw_ = std::atan2(-f.x, -f.z);
             }
-            if (drawing_) {
-                V3 d = ovm::qrot(ovm::qaxis('y', -drawYaw_), rh.pos - anchor_);
-                preview_ = Zone{};
-                preview_.type = mode_;
-                preview_.yaw = drawYaw_;
-                preview_.size[0] = std::fabs(d.x);
-                preview_.size[2] = std::fabs(d.z);
-                preview_.size[1] = mode_ == ZoneType::Plane ? 0.0f : std::fabs(d.y);
-                V3 localCenter = {d.x / 2, mode_ == ZoneType::Plane ? 0.0f : d.y / 2, d.z / 2};
-                V3 c = anchor_ + ovm::qrot(ovm::qaxis('y', drawYaw_), localCenter);
-                preview_.pos[0] = c.x;
-                preview_.pos[1] = c.y;
-                preview_.pos[2] = c.z;
+            if (phase_ == Phase::Footprint) {
+                if (hasHit_) corner_ = hit_;
+                buildPreview(0.02f);
                 if (!trig) {
-                    drawing_ = false;
-                    const bool big = preview_.size[0] > 0.05f && preview_.size[2] > 0.05f &&
-                                     (mode_ == ZoneType::Plane || preview_.size[1] > 0.03f);
-                    if (big) {
-                        preview_.name = (mode_ == ZoneType::Plane ? "plan" : "volume") + std::to_string(counter_++);
-                        preview_.object = objectName(curObject_);
-                        zones_.push_back(preview_);
-                        lastCreated_ = static_cast<int>(zones_.size()) - 1;
-                        save();
-                        std::printf("Zone '%s' creee (%zu au total)\n", preview_.name.c_str(), zones_.size());
+                    if (preview_.size[0] < 0.05f || preview_.size[2] < 0.05f) {
+                        cancelDrawing();
+                        std::printf("Zone trop petite, annulee\n");
+                    } else if (mode_ == ZoneType::Plane) {
+                        commitPreview();
+                    } else {
+                        phase_ = Phase::Height;
+                        heightRefY_ = rh.pos.y;
+                        heightAdj_ = 0;
+                        std::printf("Leve la main pour regler la hauteur, gachette pour valider (B annule)\n");
                     }
+                }
+            } else if (phase_ == Phase::Height) {
+                float sx, sy;
+                stickState(1, sx, sy);
+                if (std::fabs(sy) > 0.15f) heightAdj_ += sy * dt * 0.5f;
+                buildPreview(std::clamp(0.03f + (rh.pos.y - heightRefY_) + heightAdj_, 0.03f, 2.0f));
+                if (trig && !prevTrigger_) commitPreview();
+                else if (bb && !prevB_) {
+                    cancelDrawing();
+                    std::printf("Volume annule\n");
                 }
             }
 
@@ -768,6 +865,18 @@ private:
             const float pc[3] = {0.4f, 1.0f, 0.4f};
             const float pe[4] = {0.4f, 1.0f, 0.4f, 1};
             drawZone(rend_, preview_, pc, pe);
+        }
+        if (hands_[1].aimTracked) {
+            const bool boxMode = mode_ == ZoneType::Box;
+            const float rayCol[4] = {boxMode ? 0.0f : 1.0f, 0.9f, boxMode ? 1.0f : 0.0f, 1};
+            const float len = hasHit_ ? ovm::length(hit_ - rayOrigin_) : 3.0f;
+            rend_.box(ovm::mmul(ovm::mFromPose(rayOrigin_ + rayDir_ * (len / 2), hands_[1].aimRot),
+                                ovm::mScale({0.008f, 0.008f, len})), rayCol);
+            if (hasHit_) {
+                const float patch[4] = {1, 1, 1, 0.25f}, dot[4] = {1, 1, 1, 1};
+                rend_.box(boxWorld(hit_, 0, {0.4f, 0.004f, 0.4f}), patch);  // repere du plan de visee
+                rend_.box(boxWorld(hit_, 0, {0.05f, 0.05f, 0.05f}), dot);   // point vise
+            }
         }
         for (int hi = 0; hi < 2; hi++) {
             const Hand& h = hands_[hi];

@@ -29,7 +29,10 @@ Deux programmes, un seul fichier de zones (`%APPDATA%\OverlayVR\zones.json`) :
 
 | Action | Commande |
 |---|---|
-| Dessiner une zone | Gâchette droite maintenue : tire de l'angle A à l'angle opposé B (aligné sur ton regard) |
+| Viser | Un **laser** part de la manette droite et touche un plan horizontal (le bureau). Le point visé et un petit carré blanc au sol indiquent où tu vises |
+| Régler la hauteur du bureau | Pose la manette droite sur le bureau et clique le stick droit (valeur mémorisée, 75 cm par défaut) |
+| Dessiner un **plan** | Gâchette droite maintenue : de l'angle A à l'angle opposé B au laser, relâche pour créer |
+| Dessiner un **volume** | Même emprise, puis lève la main pour régler la hauteur (stick droit pour affiner), gâchette pour valider, B pour annuler |
 | Volume (cyan) ou plan (jaune) | Bouton A (le bout de la manette change de couleur) |
 | Déplacer | Grip droit près d'une zone (à moins de 8 cm), puis bouge la main |
 | Tourner / agrandir-réduire | Grip maintenu + stick droit : X tourne, Y change la taille |
