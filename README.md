@@ -135,6 +135,11 @@ les jeux concernés.
 
 ## Zones par jeu
 
+**Depuis la fenêtre de configuration** (onglet *Zones et jeux*) : la liste montre toutes les zones et le jeu de chacune. Sélectionne
+une ou plusieurs zones (Ctrl / Maj), choisis le jeu (ou « Tous les jeux ») et clique **Affecter** : c'est enregistré tout de suite
+dans `zones.json` et pris en compte en jeu. Le même onglet permet d'ajouter, renommer ou supprimer un jeu (nom + exécutables).
+Ferme l'éditeur du casque avant d'affecter, sinon il peut réécrire `zones.json`.
+
 Chaque jeu est un **profil** dans `settings.json` (`MSFS` et `Assetto Corsa` par défaut), avec la liste de ses exe :
 
 ```json

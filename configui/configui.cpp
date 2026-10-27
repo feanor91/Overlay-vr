@@ -31,7 +31,8 @@ namespace {
 
 enum : int {
     ID_ENABLED = 100, ID_KEYTXT, ID_KEYSET, ID_KEYNONE, ID_JOYDEV, ID_JOYSCAN, ID_BTNTXT, ID_BTNDETECT, ID_BTNNONE,
-    ID_LIVE, ID_HINT, ID_GAZE, ID_MARGIN, ID_PASSES, ID_OVERLAP, ID_HOTKEYS, ID_MODE, ID_APPS, ID_SAVE, ID_CLOSE, ID_SAVED
+    ID_LIVE, ID_HINT, ID_GAZE, ID_MARGIN, ID_PASSES, ID_OVERLAP, ID_HOTKEYS, ID_MODE, ID_APPS, ID_SAVE, ID_CLOSE, ID_SAVED,
+    ID_TAB, ID_ZLIST, ID_ASSIGN, ID_ASSIGNBTN, ID_ZRELOAD, ID_PLIST, ID_PNAME, ID_PEXE, ID_PNEW, ID_PADD, ID_PDEL
 };
 constexpr UINT_PTR kTimer = 1;
 
@@ -54,6 +55,11 @@ int g_joyButton = 0;
 bool g_captureKey = false, g_detect = false;
 bool g_keyPrev[256] = {};
 std::wstring g_liveShown;
+int g_dy = 0;                                  // decalage vertical du contenu des onglets (sous la barre d'onglets)
+std::vector<HWND>* g_cur = nullptr;            // onglet en cours de construction
+std::vector<HWND> g_tabs[2];                   // controles de chaque onglet
+std::vector<ovz::Zone> g_zones;                // zones affichees dans l'onglet « Zones et jeux »
+std::vector<ovz::Profile> g_profiles;          // jeux (profils) de settings.json
 
 int S(int v) { return MulDiv(v, g_dpi, 96); }
 
@@ -87,9 +93,10 @@ bool checked(int id) { return SendMessageW(ctl(id), BM_GETCHECK, 0, 0) == BST_CH
 void setChecked(int id, bool on) { SendMessageW(ctl(id), BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0); }
 
 HWND make(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id, DWORD ex = 0) {
-    HWND c = CreateWindowExW(ex, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y), S(w), S(h), g_wnd,
+    HWND c = CreateWindowExW(ex, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y + g_dy), S(w), S(h), g_wnd,
                              reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), g_inst, nullptr);
     SendMessageW(c, WM_SETFONT, reinterpret_cast<WPARAM>(g_font), TRUE);
+    if (g_cur) g_cur->push_back(c);
     return c;
 }
 
@@ -278,8 +285,202 @@ void pollJoysticks() {
     }
 }
 
+// --- zones et jeux (profils) -----------------------------------------------------------------------------
+std::wstring trimmed(const std::wstring& s) {
+    const size_t a = s.find_first_not_of(L" \t\r\n"), b = s.find_last_not_of(L" \t\r\n");
+    return a == std::wstring::npos ? L"" : s.substr(a, b - a + 1);
+}
+
+std::wstring joinApps(const std::vector<std::string>& v) {
+    std::wstring s;
+    for (const std::string& a : v) s += (s.empty() ? L"" : L", ") + W(a);
+    return s;
+}
+
+std::vector<std::string> splitApps(const std::wstring& text) {
+    std::vector<std::string> out;
+    std::wstring cur;
+    for (size_t i = 0; i <= text.size(); i++) {
+        if (i == text.size() || text[i] == L',' || text[i] == L';' || text[i] == L'\n') {
+            const std::wstring t = trimmed(cur);
+            if (!t.empty()) out.push_back(U(t));
+            cur.clear();
+        } else {
+            cur += text[i];
+        }
+    }
+    return out;
+}
+
+void say(const std::wstring& t) { setText(ID_SAVED, t); }
+
+void refreshProfiles() {
+    ovz::Config c;
+    ovz::loadConfig(c);
+    g_profiles = c.profiles;
+    SendMessageW(ctl(ID_PLIST), LB_RESETCONTENT, 0, 0);
+    SendMessageW(ctl(ID_ASSIGN), CB_RESETCONTENT, 0, 0);
+    SendMessageW(ctl(ID_ASSIGN), CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Tous les jeux"));
+    for (const ovz::Profile& p : g_profiles) {
+        const std::wstring line = W(p.name) + L"   —   " + joinApps(p.apps);
+        SendMessageW(ctl(ID_PLIST), LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(line.c_str()));
+        SendMessageW(ctl(ID_ASSIGN), CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(W(p.name).c_str()));
+    }
+    SendMessageW(ctl(ID_ASSIGN), CB_SETCURSEL, g_profiles.empty() ? 0 : 1, 0);
+}
+
+void refreshZones() {
+    g_zones.clear();
+    ovz::loadZones(ovz::zonesPath(), g_zones);
+    HWND lv = ctl(ID_ZLIST);
+    ListView_DeleteAllItems(lv);
+    for (size_t i = 0; i < g_zones.size(); i++) {
+        const ovz::Zone& z = g_zones[i];
+        std::wstring name = W(z.name), type = z.type == ovz::ZoneType::Plane ? L"plan" : L"volume",
+                     game = z.profile.empty() ? L"Tous les jeux" : W(z.profile);
+        LVITEMW item = {};
+        item.mask = LVIF_TEXT;
+        item.iItem = static_cast<int>(i);
+        item.pszText = &name[0];
+        ListView_InsertItem(lv, &item);
+        ListView_SetItemText(lv, static_cast<int>(i), 1, &type[0]);
+        ListView_SetItemText(lv, static_cast<int>(i), 2, &game[0]);
+    }
+}
+
+// Affecte les zones selectionnees au jeu choisi. On relit zones.json juste avant d'ecrire, par les noms.
+void assignZones() {
+    const int sel = static_cast<int>(SendMessageW(ctl(ID_ASSIGN), CB_GETCURSEL, 0, 0));
+    const std::string target = sel > 0 && sel - 1 < static_cast<int>(g_profiles.size()) ? g_profiles[sel - 1].name : "";
+    std::vector<std::string> names;
+    HWND lv = ctl(ID_ZLIST);
+    for (int i = ListView_GetNextItem(lv, -1, LVNI_SELECTED); i >= 0; i = ListView_GetNextItem(lv, i, LVNI_SELECTED))
+        if (i < static_cast<int>(g_zones.size())) names.push_back(g_zones[i].name);
+    if (names.empty()) {
+        say(L"Sélectionne d'abord une ou plusieurs zones dans la liste (Ctrl / Maj pour en prendre plusieurs).");
+        return;
+    }
+    std::vector<ovz::Zone> fresh;
+    if (!ovz::loadZones(ovz::zonesPath(), fresh)) {
+        say(L"Impossible de lire zones.json.");
+        return;
+    }
+    int changed = 0;
+    for (ovz::Zone& z : fresh)
+        if (std::find(names.begin(), names.end(), z.name) != names.end()) {
+            z.profile = target;
+            changed++;
+        }
+    if (!ovz::saveZones(ovz::zonesPath(), fresh)) {
+        say(L"Échec de l'enregistrement de zones.json.");
+        return;
+    }
+    refreshZones();
+    say(std::to_wstring(changed) + L" zone(s) affectée(s) à « " + (target.empty() ? L"Tous les jeux" : W(target)) +
+        L" » : pris en compte tout de suite.");
+}
+
+// Renomme / retire un profil dans zones.json (les zones qui l'utilisent suivent).
+void retargetZones(const std::string& from, const std::string& to) {
+    std::vector<ovz::Zone> fresh;
+    if (!ovz::loadZones(ovz::zonesPath(), fresh)) return;
+    bool changed = false;
+    for (ovz::Zone& z : fresh)
+        if (z.profile == from) {
+            z.profile = to;
+            changed = true;
+        }
+    if (changed) ovz::saveZones(ovz::zonesPath(), fresh);
+}
+
+void profileSelected() {
+    const int i = static_cast<int>(SendMessageW(ctl(ID_PLIST), LB_GETCURSEL, 0, 0));
+    if (i < 0 || i >= static_cast<int>(g_profiles.size())) return;
+    setText(ID_PNAME, W(g_profiles[i].name));
+    setText(ID_PEXE, joinApps(g_profiles[i].apps));
+}
+
+void saveProfile() {
+    const std::string name = U(trimmed(getText(ID_PNAME)));
+    const std::vector<std::string> apps = splitApps(getText(ID_PEXE));
+    if (name.empty()) {
+        say(L"Donne un nom au jeu (ex. MSFS).");
+        return;
+    }
+    ovz::Config c;
+    ovz::loadConfig(c);
+    int sel = static_cast<int>(SendMessageW(ctl(ID_PLIST), LB_GETCURSEL, 0, 0));
+    if (sel >= static_cast<int>(c.profiles.size())) sel = -1;
+    for (int i = 0; i < static_cast<int>(c.profiles.size()); i++)
+        if (i != sel && c.profiles[i].name == name) {
+            say(L"Un jeu porte déjà ce nom.");
+            return;
+        }
+    if (sel >= 0) {
+        const std::string old = c.profiles[sel].name;
+        c.profiles[sel].name = name;
+        c.profiles[sel].apps = apps;
+        if (old != name) retargetZones(old, name);
+    } else {
+        ovz::Profile p;
+        p.name = name;
+        p.apps = apps;
+        c.profiles.push_back(p);
+        sel = static_cast<int>(c.profiles.size()) - 1;
+    }
+    if (!ovz::saveConfig(c)) {
+        say(L"Échec de l'enregistrement de settings.json.");
+        return;
+    }
+    refreshProfiles();
+    refreshZones();
+    SendMessageW(ctl(ID_PLIST), LB_SETCURSEL, sel, 0);
+    say(L"Jeu « " + W(name) + L" » enregistré.");
+}
+
+void deleteProfile() {
+    ovz::Config c;
+    ovz::loadConfig(c);
+    const int sel = static_cast<int>(SendMessageW(ctl(ID_PLIST), LB_GETCURSEL, 0, 0));
+    if (sel < 0 || sel >= static_cast<int>(c.profiles.size())) {
+        say(L"Sélectionne d'abord un jeu dans la liste.");
+        return;
+    }
+    const std::string name = c.profiles[sel].name;
+    if (MessageBoxW(g_wnd, (L"Supprimer le jeu « " + W(name) + L" » ?\nSes zones deviendront visibles dans tous les jeux.").c_str(),
+                    L"OverlayVR", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        return;
+    c.profiles.erase(c.profiles.begin() + sel);
+    retargetZones(name, "");
+    ovz::saveConfig(c);
+    setText(ID_PNAME, L"");
+    setText(ID_PEXE, L"");
+    refreshProfiles();
+    refreshZones();
+    say(L"Jeu « " + W(name) + L" » supprimé.");
+}
+
+void showTab(int tab) {
+    for (int t = 0; t < 2; t++)
+        for (HWND h : g_tabs[t]) ShowWindow(h, t == tab ? SW_SHOW : SW_HIDE);
+    if (tab == 1) {
+        refreshProfiles();
+        refreshZones();
+    }
+}
+
 // --- fenetre -----------------------------------------------------------------------------------------------
 void build() {
+    HWND tab = make(L"SysTabControl32", L"", WS_TABSTOP, 6, 4, 588, 28, ID_TAB);
+    TCITEMW ti = {};
+    ti.mask = TCIF_TEXT;
+    ti.pszText = const_cast<wchar_t*>(L"Général");
+    TabCtrl_InsertItem(tab, 0, &ti);
+    ti.pszText = const_cast<wchar_t*>(L"Zones et jeux");
+    TabCtrl_InsertItem(tab, 1, &ti);
+    g_dy = 34;
+    g_cur = &g_tabs[0];
+
     make(L"BUTTON", L"Zones activées (interrupteur général, comme l'icône de la barre d'état)", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 10,
          570, 22, ID_ENABLED);
 
@@ -320,9 +521,46 @@ void build() {
     make(L"EDIT", L"", ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP, 24, 470, 552, 62, ID_APPS,
          WS_EX_CLIENTEDGE);
 
-    make(L"STATIC", L"", SS_LEFT, 12, 556, 380, 20, ID_SAVED);
-    button(L"Enregistrer", 400, 552, 90, ID_SAVE);
-    button(L"Fermer", 496, 552, 90, ID_CLOSE);
+    // --- onglet « Zones et jeux » ---
+    g_cur = &g_tabs[1];
+    group(L"Zones tracées dans le casque", 10, 10, 580, 270);
+    make(L"SysListView32", L"", LVS_REPORT | LVS_SHOWSELALWAYS | WS_TABSTOP, 24, 34, 552, 170, ID_ZLIST, WS_EX_CLIENTEDGE);
+    HWND lv = ctl(ID_ZLIST);
+    ListView_SetExtendedListViewStyle(lv, LVS_EX_FULLROWSELECT);
+    const wchar_t* cols[] = {L"Zone", L"Type", L"Jeu"};
+    const int widths[] = {200, 90, 240};
+    for (int i = 0; i < 3; i++) {
+        LVCOLUMNW col = {};
+        col.mask = LVCF_TEXT | LVCF_WIDTH;
+        col.pszText = const_cast<wchar_t*>(cols[i]);
+        col.cx = S(widths[i]);
+        ListView_InsertColumn(lv, i, &col);
+    }
+    label(L"Affecter la sélection à :", 24, 214, 170);
+    make(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 214, 200, 200, ID_ASSIGN);
+    button(L"Affecter", 410, 213, 80, ID_ASSIGNBTN);
+    button(L"Recharger", 496, 213, 80, ID_ZRELOAD);
+    make(L"STATIC", L"Une zone « Tous les jeux » apparaît dans chaque jeu autorisé ; une zone affectée à un jeu n'apparaît que dans "
+         L"celui-ci. Ferme l'éditeur du casque avant d'affecter.", SS_LEFT, 24, 242, 552, 34, 0);
+
+    group(L"Jeux", 10, 288, 580, 236);
+    make(L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP, 24, 312, 552, 90, ID_PLIST, WS_EX_CLIENTEDGE);
+    label(L"Nom du jeu", 24, 412, 160);
+    edit(190, 412, 386, ID_PNAME);
+    label(L"Exécutables (séparés par des virgules)", 24, 440, 250);
+    edit(280, 440, 296, ID_PEXE);
+    button(L"Nouveau", 24, 472, 90, ID_PNEW);
+    button(L"Ajouter / modifier", 120, 472, 130, ID_PADD);
+    button(L"Supprimer", 256, 472, 90, ID_PDEL);
+    make(L"STATIC", L"Nom exact de l'exe : ligne « couche chargée dans … » de layer.log. Un jeu qui a un profil est autorisé "
+         L"automatiquement.", SS_LEFT, 24, 500, 552, 20, 0);
+
+    g_cur = nullptr;
+    g_dy = 0;
+    make(L"STATIC", L"", SS_LEFT, 12, 592, 380, 20, ID_SAVED);
+    button(L"Enregistrer", 400, 588, 90, ID_SAVE);
+    button(L"Fermer", 496, 588, 90, ID_CLOSE);
+    showTab(0);
 }
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -374,6 +612,27 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_joyButton = 0;
                     refreshTexts();
                     break;
+                case ID_ASSIGNBTN:
+                    assignZones();
+                    break;
+                case ID_ZRELOAD:
+                    refreshProfiles();
+                    refreshZones();
+                    break;
+                case ID_PLIST:
+                    if (HIWORD(wp) == LBN_SELCHANGE) profileSelected();
+                    break;
+                case ID_PNEW:
+                    SendMessageW(ctl(ID_PLIST), LB_SETCURSEL, static_cast<WPARAM>(-1), 0);
+                    setText(ID_PNAME, L"");
+                    setText(ID_PEXE, L"");
+                    break;
+                case ID_PADD:
+                    saveProfile();
+                    break;
+                case ID_PDEL:
+                    deleteProfile();
+                    break;
                 case ID_SAVE:
                     setText(ID_SAVED, save() ? L"Enregistré : pris en compte tout de suite, sans relancer le jeu."
                                               : L"Échec de l'enregistrement de settings.json.");
@@ -382,6 +641,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     DestroyWindow(hwnd);
                     break;
             }
+            return 0;
+        case WM_NOTIFY:
+            if (reinterpret_cast<NMHDR*>(lp)->idFrom == ID_TAB && reinterpret_cast<NMHDR*>(lp)->code == TCN_SELCHANGE)
+                showTab(TabCtrl_GetCurSel(ctl(ID_TAB)));
             return 0;
         case WM_TIMER:
             pollKeys();
@@ -410,7 +673,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     }
     SetProcessDPIAware();
     g_inst = inst;
-    INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_STANDARD_CLASSES};
+    INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_STANDARD_CLASSES | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES};
     InitCommonControlsEx(&icc);
     HDC dc = GetDC(nullptr);
     g_dpi = GetDeviceCaps(dc, LOGPIXELSX);
@@ -427,7 +690,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     RegisterClassW(&wc);
 
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT r = {0, 0, S(600), S(588)};
+    RECT r = {0, 0, S(600), S(624)};
     AdjustWindowRect(&r, style, FALSE);
     const int w = r.right - r.left, h = r.bottom - r.top;
     g_wnd = CreateWindowExW(0, wc.lpszClassName, L"OverlayVR : configuration", style, (GetSystemMetrics(SM_CXSCREEN) - w) / 2,
