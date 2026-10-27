@@ -34,7 +34,7 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 
 | Action | Commande |
 |---|---|
-| Tracer une zone | Gâchette, en 3 temps : (1) maintiens la gâchette et tire le **1er bord** de A à B, c'est lui qui donne l'**orientation** ; (2) vise le côté opposé, gâchette pour valider ; (3) pour un volume, **monte ou descends la main** pour la hauteur (le volume peut passer sous le plan de visée ; stick ▲▼ pour affiner), gâchette pour valider. Un plan s'arrête à l'étape 2. B annule |
+| Tracer une zone | Gâchette, en plusieurs temps : (1) maintiens la gâchette et tire le **1er bord** de A à B, c'est lui qui donne l'**orientation** ; (2) vise le côté opposé, gâchette pour valider. Un plan s'arrête là. Pour un volume : (3) place la manette au **sommet** de l'objet (la boîte suit ta main), gâchette ; (4) descends-la au **bas** de l'objet, gâchette (ou valide directement : le bas reste alors au plan de visée). Le haut et le bas sont des hauteurs réelles : une boîte peut donc dépasser du bureau **et** descendre dessous. Stick ▲▼ pour affiner, B annule |
 | Volume (cyan) ou plan (jaune) | A |
 | Déplacer / orienter une zone | Grip tenu sur la zone visée, puis bouge la main et **tourne le poignet** ; stick droit ◄► tourne, ▲▼ agrandit/réduit ; stick gauche ▲▼ change la hauteur seule |
 | Supprimer | B sur la zone visée (ou B pendant qu'on la tient) |

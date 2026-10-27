@@ -152,10 +152,11 @@ private:
     ZoneType mode_ = ZoneType::Box;
 
     // Tracé en 3 temps : 1er bord (A -> B, donne l'orientation), puis largeur du cote oppose, puis hauteur (volume).
-    enum class Phase { Idle, Edge, Depth, Height };
+    enum class Phase { Idle, Edge, Depth, Top, Bottom };
     Phase phase_ = Phase::Idle;
     V3 anchor_, corner_;
-    float drawYaw_ = 0, dz_ = 0.02f, heightRefY_ = 0, heightAdj_ = 0;
+    float drawYaw_ = 0, dz_ = 0.02f, heightAdj_ = 0, topY_ = 0, bottomRefY_ = 0;
+    bool bottomActive_ = false;
     Zone preview_;
     float surfaceY_ = 0.75f;  // hauteur du plan de visee (bureau), reglable au clic du stick droit
     V3 hit_;                  // point vise sur ce plan (main droite)
@@ -688,8 +689,9 @@ private:
         }
     }
 
-    // Zone en cours de trace, a partir du 1er bord (anchor_ -> corner_), de la profondeur signee dz et de la hauteur.
-    void buildPreview(float dz, float height) {
+    // Zone en cours de trace : 1er bord (anchor_ -> corner_), profondeur signee dz, et pour un volume les hauteurs
+    // absolues du haut et du bas (y0, y1, dans n'importe quel ordre). Un plan reste a la hauteur du plan de visee.
+    void buildPreview(float dz, float y0, float y1) {
         const bool plane = mode_ == ZoneType::Plane;
         V3 e = corner_ - anchor_;
         e.y = 0;
@@ -697,12 +699,14 @@ private:
         if (w > 1e-4f) drawYaw_ = std::atan2(-e.z, e.x);
         const V3 xd = {std::cos(drawYaw_), 0, -std::sin(drawYaw_)}, zd = {std::sin(drawYaw_), 0, std::cos(drawYaw_)};
         V3 c = anchor_ + xd * (w / 2) + zd * (dz / 2);
-        if (!plane) c.y += height / 2;
+        float lo = std::min(y0, y1), hi = std::max(y0, y1);
+        if (hi - lo < 0.03f) hi = lo + 0.03f;
+        c.y = plane ? anchor_.y : (lo + hi) / 2;
         preview_ = Zone{};
         preview_.type = mode_;
         preview_.yaw = drawYaw_;
         preview_.size[0] = w;
-        preview_.size[1] = plane ? 0.0f : std::fabs(height);  // hauteur signee : le volume peut descendre sous le plan
+        preview_.size[1] = plane ? 0.0f : hi - lo;
         preview_.size[2] = std::fabs(dz);
         preview_.pos[0] = c.x;
         preview_.pos[1] = c.y;
@@ -733,7 +737,7 @@ private:
                 break;
             case Phase::Edge:  // gachette maintenue : on tire le 1er bord
                 if (hasHit_) corner_ = hit_;
-                buildPreview(0.02f, 0.02f);
+                buildPreview(0.02f, surfaceY_, surfaceY_ + 0.02f);
                 if (in_.b.down()) {
                     cancelDrawing();
                 } else if (!in_.trigR.now) {
@@ -751,26 +755,42 @@ private:
                     const V3 zd = {std::sin(drawYaw_), 0, std::cos(drawYaw_)};
                     dz_ = ovm::dot(hit_ - anchor_, zd);
                 }
-                buildPreview(dz_, 0.02f);
+                buildPreview(dz_, surfaceY_, surfaceY_ + 0.02f);
                 if (in_.b.down()) {
                     cancelDrawing();
                 } else if (in_.trigR.down() && std::fabs(dz_) >= 0.05f) {
                     if (mode_ == ZoneType::Plane) {
                         commitPreview();
                     } else {
-                        phase_ = Phase::Height;
-                        heightRefY_ = rh.pos.y;
+                        phase_ = Phase::Top;
                         heightAdj_ = 0;
                     }
                 }
                 break;
-            case Phase::Height: {  // on leve la main pour la hauteur ; gachette pour valider
+            case Phase::Top: {  // la manette est au SOMMET de l'objet : sa hauteur reelle fixe le haut de la boite
                 float sx, sy;
                 stickState(1, sx, sy);
-                if (std::fabs(sy) > 0.15f) heightAdj_ += sy * 0.5f * lastDt_;
-                float h = std::clamp((rh.pos.y - heightRefY_) + heightAdj_, -2.0f, 2.0f);  // monter ou descendre la main
-                if (std::fabs(h) < 0.03f) h = h < 0 ? -0.03f : 0.03f;
-                buildPreview(dz_, h);
+                if (std::fabs(sy) > 0.15f) heightAdj_ += sy * 0.3f * lastDt_;
+                const float top = rh.pos.y + heightAdj_;
+                buildPreview(dz_, surfaceY_, top);
+                if (in_.b.down()) {
+                    cancelDrawing();
+                } else if (in_.trigR.down()) {
+                    topY_ = top;
+                    phase_ = Phase::Bottom;
+                    heightAdj_ = 0;
+                    bottomRefY_ = rh.pos.y;
+                    bottomActive_ = false;
+                }
+                break;
+            }
+            case Phase::Bottom: {  // la manette est au BAS de l'objet ; sans bouger, le bas reste au plan de visee
+                float sx, sy;
+                stickState(1, sx, sy);
+                if (std::fabs(sy) > 0.15f) heightAdj_ += sy * 0.3f * lastDt_;
+                if (!bottomActive_ && std::fabs(rh.pos.y - bottomRefY_) > 0.04f) bottomActive_ = true;
+                const float bottom = (bottomActive_ ? rh.pos.y : surfaceY_) + heightAdj_;
+                buildPreview(dz_, bottom, topY_);
                 if (in_.b.down()) cancelDrawing();
                 else if (in_.trigR.down()) commitPreview();
                 break;
@@ -890,9 +910,10 @@ private:
                 hint = grab_.active ? L"Saisie : déplace la main, tourne le poignet pour orienter"
                                     : L"Prêt : vise le bureau et maintiens la gâchette droite pour tracer";
                 break;
-            case Phase::Edge: hint = std::wstring(L"1/") + (plane ? L"2" : L"3") + L" Tire le 1er bord jusqu'à l'autre coin, puis relâche (B annule)"; break;
-            case Phase::Depth: hint = std::wstring(L"2/") + (plane ? L"2" : L"3") + L" Vise le côté opposé, gâchette pour valider (B annule)"; break;
-            case Phase::Height: hint = L"3/3 Monte ou descends la main pour la hauteur, gâchette pour valider (B annule)"; break;
+            case Phase::Edge: hint = std::wstring(L"1/") + (plane ? L"2" : L"4") + L" Tire le 1er bord jusqu'à l'autre coin, puis relâche (B annule)"; break;
+            case Phase::Depth: hint = std::wstring(L"2/") + (plane ? L"2" : L"4") + L" Vise le côté opposé, gâchette pour valider (B annule)"; break;
+            case Phase::Top: hint = L"3/4 Place la manette au SOMMET de l'objet, gâchette pour valider (B annule)"; break;
+            case Phase::Bottom: hint = L"4/4 Descends la manette au BAS de l'objet (ou valide : bas = plan de visée), gâchette"; break;
         }
         if (xHold_ > 0.6f && in_.x.now && !xCleared_) hint = L"!Maintiens X… tout va être effacé";
         char buf[64];
@@ -902,7 +923,7 @@ private:
         if (!showHelp_) return;
         help_.setLines({
             L"#MAIN DROITE",
-            L"Gâchette : tracer (1er bord, puis largeur, puis hauteur ↑↓)",
+            L"Gâchette : tracer (1er bord, largeur, puis haut et bas de la boîte)",
             L"Grip tenu sur une zone visée : la déplacer ; tourne le poignet",
             L"     pour l'orienter ; stick ◄► tourne, ▲▼ taille ; stick gauche ▲▼ hauteur",
             L"B sur une zone visée : la supprimer",
