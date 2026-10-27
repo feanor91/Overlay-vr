@@ -108,8 +108,28 @@ légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :
 | Origine | Tout remettre à zéro |
 | + Maj | Pas plus grands (15 cm/s et 15°/s au lieu de 3 cm/s et 3°/s) |
 
-Le décalage est enregistré dans `settings.json` (`offset`, `offset_yaw_deg`) quelques instants après avoir relâché les touches ;
-l'éditeur l'intègre aux zones au lancement suivant. `"hotkeys": false` désactive ces raccourcis.
+Le décalage est **propre à chaque jeu** (profil) : recaler MSFS ne touche pas Assetto Corsa. Il est enregistré dans `settings.json`
+(champs `offset` / `offset_yaw_deg` du profil) quelques instants après avoir relâché les touches. `"hotkeys": false` désactive ces raccourcis.
+
+## Zones par jeu
+
+Chaque jeu est un **profil** dans `settings.json` (`MSFS` et `Assetto Corsa` par défaut), avec la liste de ses exe :
+
+```json
+"profiles": [
+  { "name": "MSFS", "apps": ["FlightSimulator2024.exe", "FlightSimulator.exe"] },
+  { "name": "Assetto Corsa", "apps": ["acs.exe", "AssettoCorsa.exe"] }
+]
+```
+
+Une zone peut appartenir à un profil : elle n'apparaît alors que dans ce jeu. Une zone sans profil apparaît dans tous les jeux
+autorisés. Les jeux qui ont un profil sont autorisés automatiquement. Pour un autre jeu, ajoute un profil avec son exe
+(le nom exact est dans `layer.log`, ligne « couche chargée dans … »).
+
+Dans l'éditeur :
+- **Stick gauche ▲▼** : choisit le **jeu actif** (« tous les jeux » ou un profil). Les nouvelles zones lui appartiennent ; les zones des autres jeux
+  s'affichent en gris et ne sont pas sélectionnables.
+- **Gâchette gauche** sur une zone visée : la rattache à l'**objet actif et au jeu actif**.
 
 ## Application de la barre d'état
 

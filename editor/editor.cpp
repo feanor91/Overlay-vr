@@ -114,7 +114,7 @@ public:
         ovz::loadZones(ovz::zonesPath(), zones_);
         loadSettings();
         ovz::ensureConfigFile();
-        bakeGameOffset();
+        loadProfiles();
         std::printf("OverlayVR editeur - %zu zone(s) chargee(s) depuis %s\n", zones_.size(),
                     ovz::zonesPath().string().c_str());
         initOpenXR();
@@ -163,6 +163,8 @@ private:
     bool hasHit_ = false;
     int counter_ = 1;
     int curObject_ = 0;
+    std::vector<std::string> profileNames_ = {std::string()};
+    int curProfile_ = 0, prevFlickY_ = 0;
 
     // Lasers : une visee par main (0 = gauche, 1 = droite).
     V3 rayOrigin_[2], rayDir_[2];
@@ -181,7 +183,7 @@ private:
     };
     struct Inputs {
         Edge trigR, gripR, a, b, thumbR, trigL, gripL, x, y, thumbL;
-        float stickLx = 0;
+        float stickLx = 0, stickLy = 0;
     } in_;
     int prevFlick_ = 0;
     float xHold_ = 0;
@@ -260,8 +262,8 @@ private:
         adapter->Release();
         factory->Release();
         rend_.init(dev_, ctx_);
-        help_.init(dev_, ctx_, 820, 460);
-        status_.init(dev_, ctx_, 820, 112);
+        help_.init(dev_, ctx_, 820, 500);
+        status_.init(dev_, ctx_, 820, 130);
     }
 
     XrAction makeAction(const char* name, XrActionType type, bool bothHands) {
@@ -487,19 +489,16 @@ private:
         }
     }
 
-    // Le recalage fait en jeu (Ctrl+Alt+fleches) est integre aux zones, puis remis a zero.
-    void bakeGameOffset() {
+    // Jeux : le jeu actif (stick gauche ▲▼) decide a quel jeu appartiennent les nouvelles zones ; index 0 = tous les jeux.
+    void loadProfiles() {
         ovz::Config c;
-        if (!ovz::loadConfig(c)) return;
-        const bool moved = c.offset[0] != 0 || c.offset[1] != 0 || c.offset[2] != 0 || c.offsetYawDeg != 0;
-        if (!moved) return;
-        ovz::applyOffset(zones_, c.offset, c.offsetYawDeg);
-        c.offset[0] = c.offset[1] = c.offset[2] = 0;
-        c.offsetYawDeg = 0;
-        ovz::saveConfig(c);
-        save();
-        std::printf("Recalage fait en jeu integre aux zones\n");
+        ovz::loadConfig(c);
+        profileNames_.assign(1, std::string());
+        for (const ovz::Profile& p : c.profiles) profileNames_.push_back(p.name);
     }
+    const std::string& activeProfile() const { return profileNames_[curProfile_]; }
+    // Zone d'un autre jeu que le jeu actif : affichee en gris, non selectionnable.
+    bool otherProfile(const Zone& z) const { return curProfile_ > 0 && !z.profile.empty() && z.profile != activeProfile(); }
 
     // --- donnees : enregistrement, historique, reglages ---------------------------------------------
     void save() { ovz::saveZones(ovz::zonesPath(), zones_); }
@@ -543,6 +542,7 @@ private:
         tBest = 1e9f;
         for (size_t i = 0; i < zones_.size(); i++) {
             const Zone& z = zones_[i];
+            if (otherProfile(z)) continue;
             Q inv = ovm::qaxis('y', -z.yaw);
             V3 lo = ovm::qrot(inv, o - V3{z.pos[0], z.pos[1], z.pos[2]});
             V3 ld = ovm::qrot(inv, d);
@@ -608,8 +608,7 @@ private:
         in_.x.set(boolState(btnX_));
         in_.y.set(boolState(btnY_));
         in_.thumbL.set(boolState(thumbClick_));
-        float sy;
-        stickState(0, in_.stickLx, sy);
+        stickState(0, in_.stickLx, in_.stickLy);
         if (boolState(menu_)) quit_ = true;
     }
 
@@ -624,7 +623,7 @@ private:
         for (size_t i = 0; i < zones_.size(); i++) {
             // Main gauche : tout l'objet. Main droite : la seule zone visee.
             // Main gauche : tout l'objet, ou TOUTES les zones si on n'en vise aucune. Main droite : la seule zone visee.
-            const bool take = zoneIndex < 0 ? true : (hand == 0 && !obj.empty()) ? zones_[i].object == obj : static_cast<int>(i) == zoneIndex;
+            const bool take = zoneIndex < 0 ? !otherProfile(zones_[i]) : (hand == 0 && !obj.empty()) ? zones_[i].object == obj : static_cast<int>(i) == zoneIndex;
             if (!take) continue;
             const Zone& z = zones_[i];
             grab_.items.push_back({i, {z.pos[0], z.pos[1], z.pos[2]}, z.yaw, {z.size[0], z.size[1], z.size[2]}});
@@ -719,6 +718,7 @@ private:
         pushHistory();
         preview_.name = (mode_ == ZoneType::Plane ? "plan" : "volume") + std::to_string(counter_++);
         preview_.object = objectName(curObject_);
+        preview_.profile = activeProfile();
         zones_.push_back(preview_);
         save();
         std::printf("Zone '%s' creee : %.2f x %.2f x %.2f m (%zu au total)\n", preview_.name.c_str(), preview_.size[0],
@@ -828,6 +828,13 @@ private:
         const int flick = in_.stickLx > 0.7f ? 1 : in_.stickLx < -0.7f ? -1 : 0;
         if (flick != 0 && flick != prevFlick_) curObject_ = (curObject_ + flick + kObjects) % kObjects;
         prevFlick_ = flick;
+        const int flickY = in_.stickLy > 0.7f ? 1 : in_.stickLy < -0.7f ? -1 : 0;
+        if (flickY != 0 && flickY != prevFlickY_ && phase_ == Phase::Idle && !grab_.active && profileNames_.size() > 1) {
+            const int n = static_cast<int>(profileNames_.size());
+            curProfile_ = (curProfile_ + flickY + n) % n;
+            hover_[0] = hover_[1] = -1;
+        }
+        prevFlickY_ = flickY;
         if (in_.x.now) {
             xHold_ += dt;
             if (!xCleared_ && xHold_ >= 2.0f) {
@@ -868,6 +875,7 @@ private:
             if (in_.trigL.down() && hover_[0] >= 0) {  // rattacher la zone visee a l'objet actif
                 pushHistory();
                 zones_[hover_[0]].object = objectName(curObject_);
+                zones_[hover_[0]].profile = activeProfile();
                 save();
             }
         }
@@ -898,6 +906,7 @@ private:
         const Zone& z = zones_[index];
         std::wstring s = widen(z.name);
         if (!z.object.empty()) s += L"  [" + widen(z.object) + L"]";
+        s += z.profile.empty() ? L"  {tous les jeux}" : L"  {" + widen(z.profile) + L"}";
         if (z.look > 0) s += L"  (visible en regardant vers le bas)";
         return s;
     }
@@ -917,9 +926,12 @@ private:
         }
         if (xHold_ > 0.6f && in_.x.now && !xCleared_) hint = L"!Maintiens X… tout va être effacé";
         char buf[64];
-        std::snprintf(buf, sizeof buf, "%d zone(s)   bureau à %.2f m", static_cast<int>(zones_.size()), surfaceY_);
-        status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : L"VOLUME") + L"   |   Objet actif : " + kObjectLabel[curObject_],
-                          hint, std::wstring(L"Zone visée : ") + zoneLabel(hover_[1] >= 0 ? hover_[1] : hover_[0]) + L"      " + widen(buf)});
+        std::snprintf(buf, sizeof buf, "%d zone(s)   |   bureau à %.2f m", static_cast<int>(zones_.size()), surfaceY_);
+        status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : L"VOLUME") + L"   |   Jeu actif : " +
+                              (curProfile_ == 0 ? std::wstring(L"tous les jeux") : widen(activeProfile())),
+                          std::wstring(L"Objet actif : ") + kObjectLabel[curObject_] + L"   |   " + widen(buf),
+                          hint,
+                          L"Zone visée : " + zoneLabel(hover_[1] >= 0 ? hover_[1] : hover_[0])});
         if (!showHelp_) return;
         help_.setLines({
             L"#MAIN DROITE",
@@ -933,7 +945,8 @@ private:
             L"X : annuler (maintenu 2 s : tout effacer)",
             L"Y sur une zone visée : visible seulement en regardant en bas",
             L"Stick ◄► : objet actif (aucun, orange, vert, violet)",
-            L"Gâchette sur une zone visée : la rattacher à l'objet actif",
+            L"Stick ▲▼ : jeu actif (les nouvelles zones lui appartiennent)",
+            L"Gâchette sur une zone visée : la rattacher à l'objet et au jeu actifs",
             L"Grip tenu sur une zone d'un objet : déplacer l'objet entier",
             L"Grip tenu dans le vide : déplacer TOUTES les zones (recalage) ;",
             L"     stick droit pendant ce geste : ◄► tourne fin, ▲▼ avance/recule",
@@ -949,6 +962,11 @@ private:
             const int obj = objectIndex(z.object);
             const bool plane = z.type == ZoneType::Plane;
             const bool hovered = static_cast<int>(i) == hover_[0] || static_cast<int>(i) == hover_[1];
+            if (otherProfile(z)) {
+                const float grey[4] = {0.38f, 0.38f, 0.42f, 1};
+                drawZone(rend_, z, grey, 0.008f);
+                continue;
+            }
             const float* col = isGrabbed(i) ? green : hovered ? white : obj > 0 ? kObjectColor[obj] : plane ? yellow : cyan;
             drawZone(rend_, z, col, hovered || isGrabbed(i) ? 0.025f : 0.012f);
             if (z.look > 0) {  // repere blanc au-dessus : affichage conditionnel actif
@@ -979,8 +997,8 @@ private:
         rend_.beginPanels();
         const Mat4 hud = ovm::mFromPose(hudPos_, ovm::qaxis('y', hudYaw_));
         const float w = 0.65f;
-        rend_.panel(ovm::mmul(hud, ovm::mmul(ovm::mTranslate({0, showHelp_ ? 0.235f : 0.0f, 0}), ovm::mScale({w, w * 112 / 820, 1}))), status_.srv());
-        if (showHelp_) rend_.panel(ovm::mmul(hud, ovm::mScale({w, w * 460 / 820, 1})), help_.srv());
+        rend_.panel(ovm::mmul(hud, ovm::mmul(ovm::mTranslate({0, showHelp_ ? 0.26f : 0.0f, 0}), ovm::mScale({w, w * 130 / 820, 1}))), status_.srv());
+        if (showHelp_) rend_.panel(ovm::mmul(hud, ovm::mScale({w, w * 500 / 820, 1})), help_.srv());
     }
 
     void frame() {

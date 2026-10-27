@@ -140,14 +140,25 @@ struct State {
     std::vector<ovz::Zone> shown;  // zones chargees + decalage global
     ULONGLONG lastTick = 0, lastKeyChange = 0;
     bool offsetDirty = false;
+    int profileIdx = -1;      // profil du jeu courant (-1 : jeu sans profil)
     std::unordered_map<std::string, bool> gazeShown;  // hysteresis : zone actuellement affichee ou non
     bool active = true;  // reglages utilisateur : la couche dessine-t-elle dans ce jeu ?
 } g;
 
 // --- reglages et zones (rechargees a chaud) -----------------------------------------------------
+// Decalage de recalage du jeu courant : celui de son profil, sinon le decalage commun.
+float* contextOffset() { return g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].offset : g.cfg.offset; }
+float& contextYaw() { return g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].offsetYawDeg : g.cfg.offsetYawDeg; }
+
+// Zones a afficher dans ce jeu : on applique d'abord le recalage a toutes (meme pivot quel que soit le jeu), puis on
+// garde celles sans jeu et celles du profil courant.
 void rebuildShown() {
-    g.shown = g.zones;
-    ovz::applyOffset(g.shown, g.cfg.offset, g.cfg.offsetYawDeg);
+    std::vector<ovz::Zone> all = g.zones;
+    ovz::applyOffset(all, contextOffset(), contextYaw());
+    g.shown.clear();
+    const std::string& mine = g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].name : std::string();
+    for (ovz::Zone& z : all)
+        if (z.profile.empty() || z.profile == mine) g.shown.push_back(std::move(z));
 }
 
 void refreshConfig() {
@@ -158,6 +169,7 @@ void refreshConfig() {
         ovz::Config c;
         if (ovz::loadConfig(c)) {
             g.cfg = c;
+            g.profileIdx = ovz::currentProfile(g.cfg, g.exeName, g.appName);
             rebuildShown();
         }
     }
@@ -464,15 +476,17 @@ void updateHotkeys(V3 fwd) {
         if (down(VK_DELETE)) dyaw += turn;
         if (down(VK_INSERT)) dyaw -= turn;
         if (down(VK_HOME)) {
-            g.cfg.offset[0] = g.cfg.offset[1] = g.cfg.offset[2] = 0;
-            g.cfg.offsetYawDeg = 0;
+            float* o = contextOffset();
+            o[0] = o[1] = o[2] = 0;
+            contextYaw() = 0;
             changed = true;
         }
         if (d.x != 0 || d.y != 0 || d.z != 0 || dyaw != 0) {
-            g.cfg.offset[0] += d.x;
-            g.cfg.offset[1] += d.y;
-            g.cfg.offset[2] += d.z;
-            g.cfg.offsetYawDeg += dyaw;
+            float* o = contextOffset();
+            o[0] += d.x;
+            o[1] += d.y;
+            o[2] += d.z;
+            contextYaw() += dyaw;
             changed = true;
         }
     }
@@ -483,7 +497,7 @@ void updateHotkeys(V3 fwd) {
     } else if (g.offsetDirty && now - g.lastKeyChange > 800) {  // touches relachees : on enregistre
         ovz::saveConfig(g.cfg);
         g.offsetDirty = false;
-        logf("decalage enregistre : %.3f %.3f %.3f m, %.1f deg", g.cfg.offset[0], g.cfg.offset[1], g.cfg.offset[2], g.cfg.offsetYawDeg);
+        logf("decalage enregistre : %.3f %.3f %.3f m, %.1f deg", contextOffset()[0], contextOffset()[1], contextOffset()[2], contextYaw());
     }
 }
 
@@ -605,8 +619,9 @@ XrResult XRAPI_CALL ovCreateApiLayerInstance(const XrInstanceCreateInfo* info, c
     g.appName = info->applicationInfo.applicationName;
     ovz::ensureConfigFile();
     refreshConfig();
-    logf("couche chargee dans %s (application OpenXR '%s') : %s%s", g.exeName.c_str(), g.appName.c_str(),
-         g.active ? "ACTIVE" : "inactive (voir settings.json)", g.disabled ? " [OVERLAYVR_DISABLE]" : "");
+    logf("couche chargee dans %s (application OpenXR '%s') : %s%s, profil : %s", g.exeName.c_str(), g.appName.c_str(),
+         g.active ? "ACTIVE" : "inactive (voir settings.json)", g.disabled ? " [OVERLAYVR_DISABLE]" : "",
+         g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].name.c_str() : "aucun (zones sans jeu seulement)");
     return XR_SUCCESS;
 }
 

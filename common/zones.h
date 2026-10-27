@@ -23,6 +23,7 @@ struct Zone {
     float look = 0;                    // > 0 : visible seulement si le regard descend d'au moins look degres
     bool enabled = true;
     std::string object;                // objet physique auquel la zone appartient ("" = fixe dans la piece)
+    std::string profile;               // jeu auquel la zone appartient ("" = tous les jeux)
 };
 
 inline std::filesystem::path dataDir() {
@@ -53,6 +54,7 @@ inline bool loadZones(const std::filesystem::path& path, std::vector<Zone>& out)
             z.look = e.value("look", 0.0f);
             z.enabled = e.value("enabled", true);
             z.object = e.value("object", "");
+            z.profile = e.value("profile", "");
             zones.push_back(z);
         }
         out = std::move(zones);
@@ -72,7 +74,8 @@ inline bool saveZones(const std::filesystem::path& path, const std::vector<Zone>
                        {"yaw", z.yaw},
                        {"look", z.look},
                        {"enabled", z.enabled},
-                       {"object", z.object}});
+                       {"object", z.object},
+                       {"profile", z.profile}});
     }
     nlohmann::json root = {{"version", 1}, {"space", "stage"}, {"zones", arr}};
     std::error_code ec;
