@@ -47,8 +47,9 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 | Annuler | X (n'importe quelle action, plusieurs fois de suite) ; **maintenu 2 s : tout effacer** (X annule aussi ça) |
 | Affichage conditionnel | Y sur la zone visée : visible seulement si tu regardes au moins 25° vers le bas (repère blanc au-dessus) |
 | Objet actif | Stick ◄► : aucun (blanc), orange, vert, violet ; les nouvelles zones lui appartiennent |
-| Rattacher une zone à l'objet actif | Gâchette sur la zone visée |
-| Déplacer un objet entier | Grip tenu sur une de ses zones ; bouge la main et tourne le poignet |
+| Rattacher une zone à l'objet actif (et au jeu actif) | Gâchette gauche sur la zone visée (prise en compte au **relâchement**) |
+| Déplacer une zone | Grip gauche (ou droit) sur la zone visée : **cette zone seulement**, même si elle appartient à un objet |
+| Déplacer un objet entier | **Gâchette gauche tenue** puis grip gauche sur une de ses zones : toutes les zones du même objet suivent d'un bloc |
 | **Recaler toutes les zones** (elles sont toutes décalées) | Grip gauche **dans le vide** (laser sur aucune zone) : toutes les zones suivent ta main d'un bloc, poignet compris ; pendant ce geste, stick droit ◄► pour tourner finement, ▲▼ pour avancer/reculer |
 | Aide / quitter | Clic du stick : masque l'aide, ou la ré-affiche **devant toi** (les panneaux restent fixes dans la pièce, ils ne suivent pas la tête) ; Menu : quitter |
 

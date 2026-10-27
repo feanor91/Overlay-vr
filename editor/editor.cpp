@@ -165,6 +165,7 @@ private:
     int curObject_ = 0;
     std::vector<std::string> profileNames_ = {std::string()};
     int curProfile_ = 0, prevFlickY_ = 0;
+    bool suppressAssign_ = false;
 
     // Lasers : une visee par main (0 = gauche, 1 = droite).
     V3 rayOrigin_[2], rayDir_[2];
@@ -612,7 +613,8 @@ private:
         if (boolState(menu_)) quit_ = true;
     }
 
-    void startGrab(int hand, int zoneIndex) {
+    // group : toute la famille (meme objet) ; sinon seulement la zone visee. zoneIndex < 0 : toutes les zones.
+    void startGrab(int hand, int zoneIndex, bool group) {
         pushHistory();
         grab_ = Grab{};
         grab_.active = true;
@@ -622,8 +624,8 @@ private:
         const std::string obj = zoneIndex >= 0 ? zones_[zoneIndex].object : std::string();
         for (size_t i = 0; i < zones_.size(); i++) {
             // Main gauche : tout l'objet. Main droite : la seule zone visee.
-            // Main gauche : tout l'objet, ou TOUTES les zones si on n'en vise aucune. Main droite : la seule zone visee.
-            const bool take = zoneIndex < 0 ? !otherProfile(zones_[i]) : (hand == 0 && !obj.empty()) ? zones_[i].object == obj : static_cast<int>(i) == zoneIndex;
+            // Par defaut la seule zone visee. Tout l'objet : seulement avec la gachette gauche tenue. TOUTES les zones : grip gauche dans le vide.
+            const bool take = zoneIndex < 0 ? !otherProfile(zones_[i]) : (group && !obj.empty()) ? zones_[i].object == obj : static_cast<int>(i) == zoneIndex;
             if (!take) continue;
             const Zone& z = zones_[i];
             grab_.items.push_back({i, {z.pos[0], z.pos[1], z.pos[2]}, z.yaw, {z.size[0], z.size[1], z.size[2]}});
@@ -864,20 +866,27 @@ private:
                 hover_[1] = -1;
                 save();
             }
-            if (in_.gripR.down() && hover_[1] >= 0 && rh.tracked && rh.aimTracked) startGrab(1, hover_[1]);
-            if (in_.gripL.down() && lh.tracked && lh.aimTracked && (hover_[0] >= 0 || !zones_.empty())) startGrab(0, hover_[0]);  // dans le vide : tout
+            if (in_.gripR.down() && hover_[1] >= 0 && rh.tracked && rh.aimTracked) startGrab(1, hover_[1], false);
+            if (in_.gripL.down() && lh.tracked && lh.aimTracked && (hover_[0] >= 0 || !zones_.empty())) {
+                const bool group = in_.trigL.now;  // gachette gauche tenue = tout l'objet de la zone visee
+                startGrab(0, hover_[0], group || hover_[0] < 0);  // dans le vide : toutes les zones
+                if (group) suppressAssign_ = true;
+            }
             if (in_.y.down() && hover_[0] >= 0) {  // affichage conditionnel de la zone visee
                 pushHistory();
                 Zone& z = zones_[hover_[0]];
                 z.look = z.look > 0 ? 0.0f : kLookDegrees;
                 save();
             }
-            if (in_.trigL.down() && hover_[0] >= 0) {  // rattacher la zone visee a l'objet actif
+        }
+        if (in_.trigL.up()) {  // rattacher la zone visee a l'objet et au jeu actifs (sauf si la gachette servait a saisir un objet)
+            if (!suppressAssign_ && phase_ == Phase::Idle && !grab_.active && hover_[0] >= 0) {
                 pushHistory();
                 zones_[hover_[0]].object = objectName(curObject_);
                 zones_[hover_[0]].profile = activeProfile();
                 save();
             }
+            suppressAssign_ = false;
         }
         if (in_.thumbR.down() && rh.tracked) {  // manette posee sur le bureau + clic = hauteur du plan de visee
             surfaceY_ = rh.pos.y;
@@ -936,7 +945,7 @@ private:
         help_.setLines({
             L"#MAIN DROITE",
             L"Gâchette : tracer (1er bord, largeur, puis haut et bas de la boîte)",
-            L"Grip tenu sur une zone visée : la déplacer ; tourne le poignet",
+            L"Grip tenu sur une zone visée : la déplacer SEULE ; tourne le poignet",
             L"     pour l'orienter ; stick ◄► tourne, ▲▼ taille ; stick gauche ▲▼ hauteur",
             L"B sur une zone visée : la supprimer",
             L"A : volume / plan        Stick ▲▼ : monter/descendre le plan de visée",
@@ -946,8 +955,8 @@ private:
             L"Y sur une zone visée : visible seulement en regardant en bas",
             L"Stick ◄► : objet actif (aucun, orange, vert, violet)",
             L"Stick ▲▼ : jeu actif (les nouvelles zones lui appartiennent)",
-            L"Gâchette sur une zone visée : la rattacher à l'objet et au jeu actifs",
-            L"Grip tenu sur une zone d'un objet : déplacer l'objet entier",
+            L"Gâchette (relâchée) sur une zone visée : la rattacher à l'objet et au jeu actifs",
+            L"Grip + gâchette tenue sur une zone d'un objet : déplacer tout l'objet",
             L"Grip tenu dans le vide : déplacer TOUTES les zones (recalage) ;",
             L"     stick droit pendant ce geste : ◄► tourne fin, ▲▼ avance/recule",
             L"Clic stick : masquer / replacer l'aide devant toi         Menu : quitter",
