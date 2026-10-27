@@ -105,8 +105,16 @@ Le décalage est **propre à chaque jeu** (profil) : recaler MSFS ne touche pas 
 ## Activer / désactiver les zones en jeu (touche ou bouton de HOTAS)
 
 Comme le clic gauche sur l'icône de la barre d'état, mais sans quitter le casque : une touche du clavier et/ou un bouton de ton
-joystick / HOTAS inversent l'interrupteur général (`enabled` de `settings.json`, donc l'icône de la barre d'état suit). Réglages
-relus à chaud, dans `%APPDATA%\OverlayVR\settings.json` :
+joystick / HOTAS inversent l'interrupteur général (`enabled` de `settings.json`, donc l'icône de la barre d'état suit).
+
+**Le plus simple : la fenêtre de configuration** (`OverlayVR Configuration` dans le menu Démarrer, ou clic droit sur l'icône de
+la barre d'état → *Configuration…*). Elle liste les joysticks / HOTAS détectés ; clique **Détecter…** puis appuie sur le bouton
+voulu : le périphérique et le numéro de bouton sont renseignés. Pour la touche clavier, clique **Définir…** puis appuie sur la
+touche (avec Ctrl / Alt / Maj si tu veux). Un encart affiche en direct les boutons enfoncés, pour tester. Clique **Enregistrer** :
+c'est pris en compte tout de suite, sans relancer le jeu. La fenêtre règle aussi l'interrupteur général, le regard, les bords et
+les jeux concernés.
+
+À la main, dans `%APPDATA%\OverlayVR\settings.json` (relu à chaud) :
 
 ```json
 "toggle_key": "space",

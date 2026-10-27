@@ -46,3 +46,9 @@ add_executable(overlayvr_tray WIN32 tray/tray.cpp)
 set_target_properties(overlayvr_tray PROPERTIES OUTPUT_NAME OverlayVR_Tray)
 target_compile_definitions(overlayvr_tray PRIVATE UNICODE _UNICODE)
 target_link_libraries(overlayvr_tray PRIVATE OpenXR::headers nlohmann_json::nlohmann_json shell32 advapi32 user32 gdi32)
+
+# Fenetre de configuration : touche / bouton de joystick de bascule, affichage, jeux concernes.
+add_executable(overlayvr_config WIN32 configui/configui.cpp)
+set_target_properties(overlayvr_config PROPERTIES OUTPUT_NAME OverlayVR_Config)
+target_compile_definitions(overlayvr_config PRIVATE UNICODE _UNICODE)
+target_link_libraries(overlayvr_config PRIVATE OpenXR::headers nlohmann_json::nlohmann_json dinput8 dxguid user32 gdi32 comctl32 shell32)

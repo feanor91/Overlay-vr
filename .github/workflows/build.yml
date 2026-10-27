@@ -24,7 +24,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist | Out-Null
-          Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/OverlayVR_Tray.exe, build/Release/OverlayVR_Editor.exe, README.md dist/
+          Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/OverlayVR_Tray.exe, build/Release/OverlayVR_Config.exe, build/Release/OverlayVR_Editor.exe, README.md dist/
           Compress-Archive -Path dist/* -DestinationPath OverlayVR-windows.zip
       - name: Installer (NSIS)
         shell: pwsh

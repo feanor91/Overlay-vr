@@ -32,12 +32,14 @@ FunctionEnd
 Section "Install"
   SetRegView 64
   nsExec::Exec 'taskkill /F /IM OverlayVR_Tray.exe'
+  nsExec::Exec 'taskkill /F /IM OverlayVR_Config.exe'
   SetOutPath "$INSTDIR"
   File "..\dist\XR_APILAYER_OVERLAYVR_zones.dll"
   File "..\dist\XR_APILAYER_OVERLAYVR_zones.json"
   File "..\dist\OverlayVR_Editor.exe"
   File "..\dist\README.md"
   File "..\dist\OverlayVR_Tray.exe"
+  File "..\dist\OverlayVR_Config.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   ; Couche API OpenXR implicite : valeur 0 = activee.
@@ -56,6 +58,7 @@ Section "Install"
   CreateDirectory "$SMPROGRAMS\OverlayVR"
   CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR (barre d'etat).lnk" "$INSTDIR\OverlayVR_Tray.exe"
   CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR Editeur.lnk" "$INSTDIR\OverlayVR_Editor.exe"
+  CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR Configuration.lnk" "$INSTDIR\OverlayVR_Config.exe"
   CreateShortcut "$SMPROGRAMS\OverlayVR\Desinstaller OverlayVR.lnk" "$INSTDIR\Uninstall.exe"
 
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OverlayVR" "DisplayName" "OverlayVR"
@@ -67,6 +70,7 @@ SectionEnd
 Section "Uninstall"
   SetRegView 64
   nsExec::Exec 'taskkill /F /IM OverlayVR_Tray.exe'
+  nsExec::Exec 'taskkill /F /IM OverlayVR_Config.exe'
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "OverlayVR"
   DeleteRegValue HKLM "${LAYER_KEY}" "${LAYER_JSON}"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OverlayVR"
@@ -78,6 +82,7 @@ Section "Uninstall"
   Delete "$INSTDIR\OverlayVR_Editor.exe"
   Delete "$INSTDIR\README.md"
   Delete "$INSTDIR\OverlayVR_Tray.exe"
+  Delete "$INSTDIR\OverlayVR_Config.exe"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
 SectionEnd

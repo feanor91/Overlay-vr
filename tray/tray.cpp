@@ -25,7 +25,7 @@ namespace {
 
 constexpr UINT kTrayMsg = WM_APP + 1;
 constexpr UINT_PTR kTimer = 1;
-enum : UINT { ID_ZONES = 1, ID_LAYER, ID_EDITOR, ID_SETTINGS, ID_FOLDER, ID_AUTOSTART, ID_QUIT };
+enum : UINT { ID_ZONES = 1, ID_LAYER, ID_EDITOR, ID_SETTINGS, ID_FOLDER, ID_AUTOSTART, ID_QUIT, ID_RAWJSON };
 enum IconState { Green = 0, Grey = 1, Red = 2 };
 
 const wchar_t* const kLayerKey = L"SOFTWARE\\Khronos\\OpenXR\\1\\ApiLayers\\Implicit";
@@ -179,7 +179,8 @@ void showMenu() {
                 L"Couche OpenXR chargée par les jeux (administrateur)");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, ID_EDITOR, L"Lancer le gestionnaire de zones (dans le casque)");
-    AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Réglages (jeux concernés, regard…)");
+    AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Configuration… (bouton de bascule, jeux, regard)");
+    AppendMenuW(m, MF_STRING, ID_RAWJSON, L"Modifier settings.json (avancé)");
     AppendMenuW(m, MF_STRING, ID_FOLDER, L"Ouvrir le dossier des données");
     AppendMenuW(m, MF_STRING | (autostartEnabled() ? MF_CHECKED : 0), ID_AUTOSTART, L"Lancer au démarrage de Windows");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
@@ -218,6 +219,11 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     launchEditor();
                     break;
                 case ID_SETTINGS: {
+                    const std::wstring exe = g_exeDir + L"\\OverlayVR_Config.exe";
+                    if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, g_exeDir.c_str(), SW_SHOW)) > 32) break;
+                    [[fallthrough]];  // pas de fenetre de configuration a cote de l'application : on ouvre le fichier
+                }
+                case ID_RAWJSON: {
                     ovz::ensureConfigFile();
                     const std::wstring arg = L"\"" + ovz::configPath().wstring() + L"\"";
                     ShellExecuteW(nullptr, L"open", L"notepad.exe", arg.c_str(), nullptr, SW_SHOW);

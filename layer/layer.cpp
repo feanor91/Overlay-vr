@@ -27,6 +27,7 @@
 
 #include "../common/mathx.h"
 #include "../common/config.h"
+#include "../common/keys.h"
 #include "../common/zones.h"
 
 // --- structures de l'interface loader <-> couche (openxr/loader_interfaces.h) ------------------
@@ -517,46 +518,6 @@ void updateHotkeys(V3 fwd) {
 }
 
 // --- bascule des zones (touche clavier / bouton manette) ---------------------------------------
-struct KeySpec {
-    int vk = 0;  // 0 : aucune touche
-    bool ctrl = false, alt = false, shift = false;
-};
-
-// "space", "f9", "ctrl+f9", "ctrl+alt+x", "numpad5", "none"...
-KeySpec parseKey(const std::string& text) {
-    KeySpec k;
-    std::vector<std::string> parts;
-    std::string cur;
-    for (char ch : ovz::lowered(text)) {
-        if (ch == '+') {
-            parts.push_back(cur);
-            cur.clear();
-        } else if (ch != ' ') {
-            cur += ch;
-        }
-    }
-    parts.push_back(cur);
-    for (size_t i = 0; i + 1 < parts.size(); i++) {
-        if (parts[i] == "ctrl") k.ctrl = true;
-        else if (parts[i] == "alt") k.alt = true;
-        else if (parts[i] == "shift") k.shift = true;
-    }
-    const std::string& n = parts.back();
-    static const struct { const char* name; int vk; } named[] = {
-        {"space", VK_SPACE}, {"enter", VK_RETURN}, {"tab", VK_TAB}, {"backspace", VK_BACK}, {"insert", VK_INSERT},
-        {"delete", VK_DELETE}, {"home", VK_HOME}, {"end", VK_END}, {"pageup", VK_PRIOR}, {"pagedown", VK_NEXT},
-        {"up", VK_UP}, {"down", VK_DOWN}, {"left", VK_LEFT}, {"right", VK_RIGHT}};
-    for (const auto& e : named)
-        if (n == e.name) k.vk = e.vk;
-    if (!k.vk && n.size() == 1 && std::isalnum(static_cast<unsigned char>(n[0]))) k.vk = std::toupper(static_cast<unsigned char>(n[0]));
-    if (!k.vk && n.size() >= 2 && n.size() <= 3 && n[0] == 'f' && std::isdigit(static_cast<unsigned char>(n[1]))) {
-        const int num = std::atoi(n.c_str() + 1);
-        if (num >= 1 && num <= 24) k.vk = VK_F1 + num - 1;
-    }
-    if (!k.vk && n.size() == 7 && n.compare(0, 6, "numpad") == 0 && std::isdigit(static_cast<unsigned char>(n[6]))) k.vk = VK_NUMPAD0 + (n[6] - '0');
-    return k;
-}
-
 // Inverse l'interrupteur general (le meme que le menu de la barre d'etat). Sans effet dans un jeu que la couche ignore.
 void toggleZones(const char* source) {
     const ULONGLONG now = GetTickCount64();
@@ -575,10 +536,10 @@ void toggleZones(const char* source) {
 
 void pollToggleKey() {
     static std::string cached;
-    static KeySpec spec;
+    static ovz::KeySpec spec;
     if (cached != g.cfg.toggleKey) {
         cached = g.cfg.toggleKey;
-        spec = parseKey(cached);
+        spec = ovz::parseKey(cached);
     }
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     const bool pressed = spec.vk && down(spec.vk) && (!spec.ctrl || down(VK_CONTROL)) && (!spec.alt || down(VK_MENU)) &&
