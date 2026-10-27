@@ -29,6 +29,9 @@ Section "Install"
   File "..\dist\XR_APILAYER_OVERLAYVR_zones.json"
   File "..\dist\OverlayVR_Editor.exe"
   File "..\dist\README.md"
+  File "..\dist\desactiver_couche.bat"
+  File "..\dist\reactiver_couche.bat"
+  File "..\dist\basculer_zones.ps1"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   ; Couche API OpenXR implicite : valeur 0 = activee.
@@ -46,6 +49,9 @@ Section "Install"
 
   CreateDirectory "$SMPROGRAMS\OverlayVR"
   CreateShortcut "$SMPROGRAMS\OverlayVR\Reglages (jeux concernes).lnk" "notepad.exe" '"$APPDATA\OverlayVR\settings.json"'
+  CreateShortcut "$SMPROGRAMS\OverlayVR\Zones ON-OFF (instantane).lnk" "powershell.exe" '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\basculer_zones.ps1"'
+  CreateShortcut "$SMPROGRAMS\OverlayVR\Desactiver la couche OpenXR.lnk" "$INSTDIR\desactiver_couche.bat"
+  CreateShortcut "$SMPROGRAMS\OverlayVR\Reactiver la couche OpenXR.lnk" "$INSTDIR\reactiver_couche.bat"
   CreateShortcut "$SMPROGRAMS\OverlayVR\Dossier des donnees.lnk" "explorer.exe" '"$APPDATA\OverlayVR"'
   CreateShortcut "$SMPROGRAMS\OverlayVR\Journal de la couche.lnk" "notepad.exe" '"$APPDATA\OverlayVR\layer.log"'
   CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR Editeur.lnk" "$INSTDIR\OverlayVR_Editor.exe"
@@ -68,6 +74,9 @@ Section "Uninstall"
   Delete "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.json"
   Delete "$INSTDIR\OverlayVR_Editor.exe"
   Delete "$INSTDIR\README.md"
+  Delete "$INSTDIR\desactiver_couche.bat"
+  Delete "$INSTDIR\reactiver_couche.bat"
+  Delete "$INSTDIR\basculer_zones.ps1"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
 SectionEnd

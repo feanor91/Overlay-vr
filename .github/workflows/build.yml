@@ -24,7 +24,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist | Out-Null
-          Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/OverlayVR_Editor.exe, README.md dist/
+          Copy-Item build/Release/XR_APILAYER_OVERLAYVR_zones.dll, build/Release/XR_APILAYER_OVERLAYVR_zones.json, build/Release/install_layer.bat, build/Release/uninstall_layer.bat, build/Release/desactiver_couche.bat, build/Release/reactiver_couche.bat, build/Release/basculer_zones.ps1, build/Release/OverlayVR_Editor.exe, README.md dist/
           Compress-Archive -Path dist/* -DestinationPath OverlayVR-windows.zip
       - name: Installer (NSIS)
         shell: pwsh
@@ -60,5 +60,5 @@ jobs:
           generate_release_notes: true
           prerelease: true
           body: |
-            Premiere version de test (0.0.1) : zones passthrough globales pour Virtual Desktop (VDXR).
-            Non testee avec un casque a ce stade. Voir le README pour l'installation et les commandes.
+            OverlayVR ${{ inputs.version != '' && inputs.version || github.ref_name }} (version de test, non validee sur tous les materiels).
+            Telecharge OverlayVR-Setup-*.exe, ferme MSFS avant de l'installer. Voir le README pour les commandes et les reglages.

@@ -455,9 +455,9 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     if (quads.empty()) return nx.EndFrame(session, info);
 
     // Chaque face est superposee plusieurs fois : un pixel de bord couvert a moitie passe a 75 %, 87 %... de magenta,
-    // et Virtual Desktop l'efface avec le reste au lieu de laisser un liseré rose. Au plus ~80 couches au total.
+    // et Virtual Desktop l'efface avec le reste au lieu de laisser un liseré rose. Plafond de couches : chaque couche pese sur le GPU.
     const size_t base = quads.size();
-    const size_t passes = std::clamp<size_t>(80 / base, 1, static_cast<size_t>(g.cfg.edgePasses));
+    const size_t passes = std::clamp<size_t>(24 / base, 1, static_cast<size_t>(g.cfg.edgePasses));
     quads.reserve(base * passes);
     for (size_t p = 1; p < passes; p++)
         for (size_t i = 0; i < base; i++) quads.push_back(quads[i]);

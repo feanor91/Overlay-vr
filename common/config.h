@@ -15,7 +15,7 @@ struct Config {
     std::vector<std::string> apps = {"FlightSimulator2024.exe", "FlightSimulator.exe"};
     bool gazeOnly = true;      // une zone n'apparait que si on la regarde (direction de la tete)
     float gazeMargin = 8.0f;   // degres : le centre du regard doit viser la zone a cette marge pres (hysteresis +4 une fois affichee)
-    int edgePasses = 3;        // chaque face est superposee n fois : les pixels de bord, partiellement magenta, le deviennent presque entierement
+    int edgePasses = 1;        // superpositions de chaque face (1 a 6). Plus de passes = bords plus propres mais plus de couches a composer (FPS)
     float overlapCm = 3.0f;    // les faces d'un volume se recouvrent de ce qu'il faut pour cacher les raccords
 };
 

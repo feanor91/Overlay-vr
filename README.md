@@ -87,12 +87,24 @@ Autres réglages du même fichier :
 | `gaze_only: true` (défaut) | Une zone n'apparaît que **quand ton regard pointe vers elle** : un rayon part du centre de ta vue (orientation de la tête, pas de suivi des yeux) et doit croiser la zone ; `false` : toujours visibles |
 | `gaze_margin: 8` | Tolérance en degrés autour de la zone. Plus petit = il faut viser plus précisément ; plus grand = elle apparaît plus tôt. Une fois affichée, elle reste visible 4° de plus |
 | `edge_overlap_cm: 3` | Recouvrement des faces d'un volume : cache les lignes roses aux raccords |
-| `edge_passes: 3` | Chaque face est superposée n fois (1 à 6) : les pixels de bord, partiellement magenta, le deviennent presque entièrement, ce qui efface les liserés roses du contour. Réduis si tu as beaucoup de zones |
+| `edge_passes: 1` | Chaque face est superposée n fois (1 à 6) : les bords sont plus propres (moins de liseré rose) mais chaque passe ajoute une couche à composer et **coûte des FPS**. 1 par défaut ; monte à 2 si tu as de la marge |
 
 Si un léger liseré rose subsiste, augmente aussi la tolérance de la couleur du chroma key dans Virtual Desktop.
 
 Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Journal de la couche ») : la ligne
 `couche chargée dans XXX.exe` donne le nom exact à copier dans `apps` (le nom de l'application OpenXR marche aussi).
+
+## Désactiver la couche
+
+Trois niveaux, du plus léger au plus complet (raccourcis dans le menu Démarrer, dossier OverlayVR) :
+
+| Besoin | Comment | Effet |
+|---|---|---|
+| Couper les zones tout de suite, même en jeu | Raccourci **Zones ON-OFF (instantané)** (ou `"enabled": false` dans `settings.json`) | Immédiat, sans droits administrateur. La couche reste chargée mais ne dessine plus rien |
+| Ne plus charger la couche du tout | Raccourci **Désactiver la couche OpenXR** (administrateur) | Aucun jeu ne la charge, **au prochain lancement du jeu**. **Réactiver la couche OpenXR** pour revenir |
+| Désinstaller | « Désinstaller OverlayVR » (menu Démarrer) | Retire tout |
+
+Pour savoir si la couche pèse sur tes FPS, désactive-la (niveau 2) et compare.
 
 ## Limites et points à valider casque sur la tête
 
