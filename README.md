@@ -34,11 +34,11 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 
 | Action | Commande |
 |---|---|
-| Tracer une zone | Gâchette, en 3 temps : (1) maintiens la gâchette et tire le **1er bord** de A à B, c'est lui qui donne l'**orientation** ; (2) vise le côté opposé, gâchette pour valider ; (3) pour un volume, lève la main pour la **hauteur** (stick ▲▼ pour affiner), gâchette pour valider. Un plan s'arrête à l'étape 2. B annule |
+| Tracer une zone | Gâchette, en 3 temps : (1) maintiens la gâchette et tire le **1er bord** de A à B, c'est lui qui donne l'**orientation** ; (2) vise le côté opposé, gâchette pour valider ; (3) pour un volume, **monte ou descends la main** pour la hauteur (le volume peut passer sous le plan de visée ; stick ▲▼ pour affiner), gâchette pour valider. Un plan s'arrête à l'étape 2. B annule |
 | Volume (cyan) ou plan (jaune) | A |
-| Déplacer / orienter une zone | Grip tenu sur la zone visée, puis bouge la main et **tourne le poignet** ; stick ◄► tourne, ▲▼ agrandit/réduit |
+| Déplacer / orienter une zone | Grip tenu sur la zone visée, puis bouge la main et **tourne le poignet** ; stick droit ◄► tourne, ▲▼ agrandit/réduit ; stick gauche ▲▼ change la hauteur seule |
 | Supprimer | B sur la zone visée (ou B pendant qu'on la tient) |
-| Hauteur du plan de visée | Pose la manette sur le bureau et clique le stick (mémorisée, 75 cm par défaut) |
+| Hauteur du plan de visée | Stick ▲▼ (sans grip) pour le monter ou le descendre, ou pose la manette sur une surface et clique le stick ; mémorisée (75 cm par défaut) |
 
 **Main gauche**
 
@@ -49,7 +49,7 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 | Objet actif | Stick ◄► : aucun (blanc), orange, vert, violet ; les nouvelles zones lui appartiennent |
 | Rattacher une zone à l'objet actif | Gâchette sur la zone visée |
 | Déplacer un objet entier | Grip tenu sur une de ses zones ; bouge la main et tourne le poignet |
-| Aide / quitter | Clic du stick : masque ou affiche l'aide ; Menu : quitter |
+| Aide / quitter | Clic du stick : masque l'aide, ou la ré-affiche **devant toi** (les panneaux restent fixes dans la pièce, ils ne suivent pas la tête) ; Menu : quitter |
 
 ### Objets déplaçables (clavier, HOTAS…)
 

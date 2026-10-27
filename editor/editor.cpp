@@ -196,11 +196,14 @@ private:
         bool active = false;
         int hand = 1;
         V3 hand0;
-        float heading0 = 0, extraYaw = 0, scale = 1;
+        float heading0 = 0, extraYaw = 0, scale = 1, heightScale = 1;
         std::vector<Saved> items;
     } grab_;
 
     bool showHelp_ = true;
+    V3 hudPos_;
+    float hudYaw_ = 0;
+    bool hudPlaced_ = false, headValid_ = false, surfaceDirty_ = false;
     TextPanel help_, status_;
     std::chrono::steady_clock::time_point lastFrame_ = std::chrono::steady_clock::now();
     Q headRot_;
@@ -254,8 +257,8 @@ private:
         adapter->Release();
         factory->Release();
         rend_.init(dev_, ctx_);
-        help_.init(dev_, ctx_, 760, 392);
-        status_.init(dev_, ctx_, 760, 112);
+        help_.init(dev_, ctx_, 820, 420);
+        status_.init(dev_, ctx_, 820, 112);
     }
 
     XrAction makeAction(const char* name, XrActionType type, bool bothHands) {
@@ -477,6 +480,7 @@ private:
         if (XR_SUCCEEDED(xrLocateSpace(view_, stage_, time, &l)) && (l.locationFlags & need) == need) {
             headPos_ = {l.pose.position.x, l.pose.position.y, l.pose.position.z};
             headRot_ = {l.pose.orientation.x, l.pose.orientation.y, l.pose.orientation.z, l.pose.orientation.w};
+            headValid_ = true;
         }
     }
 
@@ -632,6 +636,9 @@ private:
             stickState(1, sx, sy);
             if (std::fabs(sx) > 0.15f) grab_.extraYaw += sx * dt * 1.5f;
             if (std::fabs(sy) > 0.15f) grab_.scale = std::clamp(grab_.scale * (1.0f + sy * dt * 0.8f), 0.3f, 3.0f);
+            float lx, ly;
+            stickState(0, lx, ly);  // stick gauche haut/bas : hauteur seule (volumes)
+            if (std::fabs(ly) > 0.15f) grab_.heightScale = std::clamp(grab_.heightScale * (1.0f + ly * dt * 0.8f), 0.2f, 5.0f);
         }
         const float dyaw = headingOf(h.aimRot) - grab_.heading0 + grab_.extraYaw;
         const Q rot = ovm::qaxis('y', dyaw);
@@ -648,7 +655,8 @@ private:
             z.pos[2] = np.z;
             z.yaw = s.yaw + dyaw;
             if (grab_.hand == 1)
-                for (int k = 0; k < 3; k++) z.size[k] = z.type == ZoneType::Plane && k == 1 ? 0.0f : std::clamp(s.size[k] * grab_.scale, 0.03f, 6.0f);
+                for (int k = 0; k < 3; k++)
+                    z.size[k] = z.type == ZoneType::Plane && k == 1 ? 0.0f : std::clamp(s.size[k] * grab_.scale * (k == 1 ? grab_.heightScale : 1.0f), 0.03f, 6.0f);
         }
     }
 
@@ -666,7 +674,7 @@ private:
         preview_.type = mode_;
         preview_.yaw = drawYaw_;
         preview_.size[0] = w;
-        preview_.size[1] = plane ? 0.0f : height;
+        preview_.size[1] = plane ? 0.0f : std::fabs(height);  // hauteur signee : le volume peut descendre sous le plan
         preview_.size[2] = std::fabs(dz);
         preview_.pos[0] = c.x;
         preview_.pos[1] = c.y;
@@ -732,7 +740,9 @@ private:
                 float sx, sy;
                 stickState(1, sx, sy);
                 if (std::fabs(sy) > 0.15f) heightAdj_ += sy * 0.5f * lastDt_;
-                buildPreview(dz_, std::clamp(0.03f + (rh.pos.y - heightRefY_) + heightAdj_, 0.03f, 2.0f));
+                float h = std::clamp((rh.pos.y - heightRefY_) + heightAdj_, -2.0f, 2.0f);  // monter ou descendre la main
+                if (std::fabs(h) < 0.03f) h = h < 0 ? -0.03f : 0.03f;
+                buildPreview(dz_, h);
                 if (in_.b.down()) cancelDrawing();
                 else if (in_.trigR.down()) commitPreview();
                 break;
@@ -748,7 +758,25 @@ private:
         const Hand& lh = hands_[0];
 
         // Main gauche : aide, objet actif, annuler / tout effacer.
-        if (in_.thumbL.down()) showHelp_ = !showHelp_;
+        if (!hudPlaced_ && headValid_) {
+            placeHud();
+            hudPlaced_ = true;
+        }
+        if (in_.thumbL.down()) {
+            showHelp_ = !showHelp_;
+            if (showHelp_) placeHud();  // reapparait devant toi
+        }
+        if (phase_ == Phase::Idle && !grab_.active) {  // stick droit haut/bas : monte/descend le plan de visee
+            float sx, sy;
+            stickState(1, sx, sy);
+            if (std::fabs(sy) > 0.5f) {
+                surfaceY_ = std::clamp(surfaceY_ + sy * 0.6f * dt, 0.0f, 2.5f);
+                surfaceDirty_ = true;
+            } else if (surfaceDirty_) {
+                saveSettings();
+                surfaceDirty_ = false;
+            }
+        }
         const int flick = in_.stickLx > 0.7f ? 1 : in_.stickLx < -0.7f ? -1 : 0;
         if (flick != 0 && flick != prevFlick_) curObject_ = (curObject_ + flick + kObjects) % kObjects;
         prevFlick_ = flick;
@@ -805,6 +833,17 @@ private:
         updateHud();
     }
 
+    // Les panneaux restent fixes dans la piece, devant toi au moment ou ils sont (re)affiches.
+    void placeHud() {
+        V3 f = ovm::qrot(headRot_, V3{0, 0, -1});
+        f.y = 0;
+        const float n = ovm::length(f);
+        f = n > 1e-3f ? f * (1.0f / n) : V3{0, 0, -1};
+        hudPos_ = headPos_ + f * 1.1f;
+        hudPos_.y = headPos_.y - 0.12f;
+        hudYaw_ = headingOf(headRot_);
+    }
+
     // --- aide et etat affiches dans le casque ------------------------------------------------------------
     std::wstring zoneLabel(int index) const {
         if (index < 0 || index >= static_cast<int>(zones_.size())) return L"—";
@@ -825,7 +864,7 @@ private:
                 break;
             case Phase::Edge: hint = std::wstring(L"1/") + (plane ? L"2" : L"3") + L" Tire le 1er bord jusqu'à l'autre coin, puis relâche (B annule)"; break;
             case Phase::Depth: hint = std::wstring(L"2/") + (plane ? L"2" : L"3") + L" Vise le côté opposé, gâchette pour valider (B annule)"; break;
-            case Phase::Height: hint = L"3/3 Lève la main pour la hauteur, gâchette pour valider (B annule)"; break;
+            case Phase::Height: hint = L"3/3 Monte ou descends la main pour la hauteur, gâchette pour valider (B annule)"; break;
         }
         if (xHold_ > 0.6f && in_.x.now && !xCleared_) hint = L"!Maintiens X… tout va être effacé";
         char buf[64];
@@ -835,18 +874,19 @@ private:
         if (!showHelp_) return;
         help_.setLines({
             L"#MAIN DROITE",
-            L"Gâchette : tracer (1er bord, puis largeur, puis hauteur)",
+            L"Gâchette : tracer (1er bord, puis largeur, puis hauteur ↑↓)",
             L"Grip tenu sur une zone visée : la déplacer ; tourne le poignet",
-            L"     pour l'orienter ; stick ◄► tourne, ▲▼ agrandit/réduit",
+            L"     pour l'orienter ; stick ◄► tourne, ▲▼ taille ; stick gauche ▲▼ hauteur",
             L"B sur une zone visée : la supprimer",
-            L"A : volume / plan        Clic stick : hauteur du bureau",
+            L"A : volume / plan        Stick ▲▼ : monter/descendre le plan de visée",
+            L"Clic stick : plan de visée = hauteur de la manette (posée sur le bureau)",
             L"#MAIN GAUCHE",
             L"X : annuler (maintenu 2 s : tout effacer)",
             L"Y sur une zone visée : visible seulement en regardant en bas",
             L"Stick ◄► : objet actif (aucun, orange, vert, violet)",
             L"Gâchette sur une zone visée : la rattacher à l'objet actif",
             L"Grip tenu sur une zone d'un objet : déplacer l'objet entier",
-            L"Clic stick : masquer cette aide          Menu : quitter",
+            L"Clic stick : masquer / replacer l'aide devant toi         Menu : quitter",
         });
     }
 
@@ -859,12 +899,12 @@ private:
             const bool plane = z.type == ZoneType::Plane;
             const bool hovered = static_cast<int>(i) == hover_[0] || static_cast<int>(i) == hover_[1];
             const float* col = isGrabbed(i) ? green : hovered ? white : obj > 0 ? kObjectColor[obj] : plane ? yellow : cyan;
-            drawZone(rend_, z, col, hovered || isGrabbed(i) ? 0.04f : 0.022f);
+            drawZone(rend_, z, col, hovered || isGrabbed(i) ? 0.025f : 0.012f);
             if (z.look > 0) {  // repere blanc au-dessus : affichage conditionnel actif
                 rend_.box(boxWorld({z.pos[0], z.pos[1] + (plane ? 0.06f : z.size[1] / 2 + 0.06f), z.pos[2]}, 0, {0.05f, 0.05f, 0.05f}), white);
             }
         }
-        if (phase_ != Phase::Idle) drawZone(rend_, preview_, green, 0.04f);
+        if (phase_ != Phase::Idle) drawZone(rend_, preview_, green, 0.025f);
 
         // Lasers et curseurs.
         const bool boxMode = mode_ == ZoneType::Box;
@@ -880,18 +920,16 @@ private:
             rend_.box(boxWorld(rayOrigin_[i] + rayDir_[i] * len, 0, {0.04f, 0.04f, 0.04f}), white);
         }
         if (hasHit_ && hover_[1] < 0) {  // croix sur le plan de visee
-            rend_.box(boxWorld(hit_, 0, {0.22f, 0.012f, 0.012f}), white);
-            rend_.box(boxWorld(hit_, 0, {0.012f, 0.012f, 0.22f}), white);
+            rend_.box(boxWorld(hit_, 0, {0.12f, 0.008f, 0.008f}), white);
+            rend_.box(boxWorld(hit_, 0, {0.008f, 0.008f, 0.12f}), white);
         }
 
-        // Panneaux de texte fixes dans le champ de vision, a gauche.
+        // Panneaux de texte fixes dans la piece (ils ne suivent pas la tete), l'etat au-dessus de l'aide.
         rend_.beginPanels();
-        const Mat4 head = ovm::mFromPose(headPos_, headRot_);
-        rend_.panel(ovm::mmul(head, ovm::mmul(ovm::mTranslate({-0.33f, -0.12f, -0.9f}), ovm::mScale({0.5f, 0.5f * 112 / 760, 1}))),
-                    status_.srv());
-        if (showHelp_)
-            rend_.panel(ovm::mmul(head, ovm::mmul(ovm::mTranslate({-0.33f, -0.30f, -0.9f}), ovm::mScale({0.5f, 0.5f * 392 / 760, 1}))),
-                        help_.srv());
+        const Mat4 hud = ovm::mFromPose(hudPos_, ovm::qaxis('y', hudYaw_));
+        const float w = 0.65f;
+        rend_.panel(ovm::mmul(hud, ovm::mmul(ovm::mTranslate({0, showHelp_ ? 0.235f : 0.0f, 0}), ovm::mScale({w, w * 112 / 820, 1}))), status_.srv());
+        if (showHelp_) rend_.panel(ovm::mmul(hud, ovm::mScale({w, w * 420 / 820, 1})), help_.srv());
     }
 
     void frame() {
