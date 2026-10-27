@@ -35,7 +35,18 @@ Section "Install"
   WriteRegDWORD HKLM "${LAYER_KEY}" "${LAYER_JSON}" 0
   WriteRegStr HKLM "Software\OverlayVR" "InstallDir" "$INSTDIR"
 
+  ; Reglages utilisateur : cree le fichier par defaut s'il n'existe pas (jamais ecrase).
+  SetShellVarContext current
+  CreateDirectory "$APPDATA\OverlayVR"
+  IfFileExists "$APPDATA\OverlayVR\settings.json" settings_done 0
+    FileOpen $0 "$APPDATA\OverlayVR\settings.json" w
+    FileWrite $0 '{$\r$\n  "enabled": true,$\r$\n  "mode": "allowlist",$\r$\n  "apps": ["FlightSimulator2024.exe", "FlightSimulator.exe"]$\r$\n}$\r$\n'
+    FileClose $0
+  settings_done:
+
   CreateDirectory "$SMPROGRAMS\OverlayVR"
+  CreateShortcut "$SMPROGRAMS\OverlayVR\Reglages (jeux concernes).lnk" "notepad.exe" '"$APPDATA\OverlayVR\settings.json"'
+  CreateShortcut "$SMPROGRAMS\OverlayVR\Journal de la couche.lnk" "notepad.exe" '"$APPDATA\OverlayVR\layer.log"'
   CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR Editeur.lnk" "$INSTDIR\OverlayVR_Editor.exe"
   CreateShortcut "$SMPROGRAMS\OverlayVR\Desinstaller OverlayVR.lnk" "$INSTDIR\Uninstall.exe"
 

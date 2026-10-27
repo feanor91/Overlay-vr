@@ -38,6 +38,7 @@
 #include <string>
 #include <vector>
 
+#include "../common/config.h"
 #include "../common/mathx.h"
 #include "../common/zones.h"
 
@@ -245,6 +246,7 @@ public:
         SetEnvironmentVariableA("OVERLAYVR_DISABLE", "1");  // la couche globale ne doit pas s'ajouter ici
         ovz::loadZones(ovz::zonesPath(), zones_);
         loadSettings();
+        ovz::ensureConfigFile();
         std::printf("OverlayVR editeur - %zu zone(s) chargee(s) depuis %s\n", zones_.size(),
                     ovz::zonesPath().string().c_str());
         initOpenXR();

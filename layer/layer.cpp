@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "../common/mathx.h"
+#include "../common/config.h"
 #include "../common/zones.h"
 
 // --- structures de l'interface loader <-> couche (openxr/loader_interfaces.h) ------------------
@@ -130,14 +131,33 @@ struct State {
     bool swapchainReady = false;
     std::vector<ovz::Zone> zones;
     FILETIME zonesStamp = {};
+    FILETIME configStamp = {};
     ULONGLONG lastCheck = 0;
+    ovz::Config cfg;
+    std::string exeName, appName;
+    bool active = true;  // reglages utilisateur : la couche dessine-t-elle dans ce jeu ?
 } g;
 
-// --- zones (rechargees a chaud) -------------------------------------------------------------
+// --- reglages et zones (rechargees a chaud) -----------------------------------------------------
+void refreshConfig() {
+    WIN32_FILE_ATTRIBUTE_DATA attr;
+    if (GetFileAttributesExW(ovz::configPath().c_str(), GetFileExInfoStandard, &attr) &&
+        CompareFileTime(&attr.ftLastWriteTime, &g.configStamp) != 0) {
+        g.configStamp = attr.ftLastWriteTime;
+        ovz::Config c;
+        if (ovz::loadConfig(c)) g.cfg = c;
+    }
+    bool now = ovz::appAllowed(g.cfg, g.exeName, g.appName);
+    if (now != g.active) logf("%s (%s) : couche %s", g.exeName.c_str(), g.appName.c_str(), now ? "ACTIVE" : "inactive");
+    g.active = now;
+}
+
 void refreshZones() {
     ULONGLONG now = GetTickCount64();
     if (now - g.lastCheck < 500) return;
     g.lastCheck = now;
+    refreshConfig();
+    if (!g.active) return;
     auto path = ovz::zonesPath();
     WIN32_FILE_ATTRIBUTE_DATA attr;
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attr)) {
@@ -373,7 +393,7 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     if (g.disabled || session != g.session || g.api == Api::None) return nx.EndFrame(session, info);
 
     refreshZones();
-    if (g.zones.empty() || !ensureSwapchain()) return nx.EndFrame(session, info);
+    if (!g.active || g.zones.empty() || !ensureSwapchain()) return nx.EndFrame(session, info);
 
     // Pose de la tete dans le repere STAGE, pour l'affichage conditionnel et le choix des faces.
     XrSpaceLocation loc = {XR_TYPE_SPACE_LOCATION};
@@ -466,7 +486,16 @@ XrResult XRAPI_CALL ovCreateApiLayerInstance(const XrInstanceCreateInfo* info, c
     fetch(*instance, "xrAcquireSwapchainImage", nx.AcquireSwapchainImage);
     fetch(*instance, "xrWaitSwapchainImage", nx.WaitSwapchainImage);
     fetch(*instance, "xrReleaseSwapchainImage", nx.ReleaseSwapchainImage);
-    logf("couche chargee%s", g.disabled ? " (desactivee par OVERLAYVR_DISABLE)" : "");
+
+    char path[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    const char* slash = std::strrchr(path, '\\');
+    g.exeName = slash ? slash + 1 : path;
+    g.appName = info->applicationInfo.applicationName;
+    ovz::ensureConfigFile();
+    refreshConfig();
+    logf("couche chargee dans %s (application OpenXR '%s') : %s%s", g.exeName.c_str(), g.appName.c_str(),
+         g.active ? "ACTIVE" : "inactive (voir settings.json)", g.disabled ? " [OVERLAYVR_DISABLE]" : "");
     return XR_SUCCESS;
 }
 

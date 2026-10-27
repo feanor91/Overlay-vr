@@ -58,6 +58,29 @@ suivi automatique, rien n'est lu pendant le jeu.
 
 Le fichier `zones.json` est modifiable à la main (`pos`, `size` en mètres, `yaw` en radians, `look` en degrés).
 
+## Choisir les jeux concernés
+
+La couche est chargée par tous les jeux OpenXR, mais elle ne **dessine** que dans ceux que tu autorises. Les réglages sont dans
+`%APPDATA%\OverlayVR\settings.json` (raccourci « Réglages » dans le menu Démarrer), relus à chaud :
+
+```json
+{
+  "enabled": true,
+  "mode": "allowlist",
+  "apps": ["FlightSimulator2024.exe", "FlightSimulator.exe"]
+}
+```
+
+| Réglage | Effet |
+|---|---|
+| `enabled: false` | Interrupteur général : plus aucune zone nulle part |
+| `mode: "allowlist"` (défaut) | Seulement les jeux listés dans `apps` |
+| `mode: "blocklist"` | Tous les jeux sauf ceux listés |
+| `mode: "all"` | Tous les jeux |
+
+Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Journal de la couche ») : la ligne
+`couche chargée dans XXX.exe` donne le nom exact à copier dans `apps` (le nom de l'application OpenXR marche aussi).
+
 ## Limites et points à valider casque sur la tête
 
 Ce code n'a **pas encore été testé avec un casque** : il compile, la logique mathématique est vérifiée, le reste est à valider.
