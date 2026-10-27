@@ -46,6 +46,7 @@ Section "Install"
 
   CreateDirectory "$SMPROGRAMS\OverlayVR"
   CreateShortcut "$SMPROGRAMS\OverlayVR\Reglages (jeux concernes).lnk" "notepad.exe" '"$APPDATA\OverlayVR\settings.json"'
+  CreateShortcut "$SMPROGRAMS\OverlayVR\Dossier des donnees.lnk" "explorer.exe" '"$APPDATA\OverlayVR"'
   CreateShortcut "$SMPROGRAMS\OverlayVR\Journal de la couche.lnk" "notepad.exe" '"$APPDATA\OverlayVR\layer.log"'
   CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR Editeur.lnk" "$INSTDIR\OverlayVR_Editor.exe"
   CreateShortcut "$SMPROGRAMS\OverlayVR\Desinstaller OverlayVR.lnk" "$INSTDIR\Uninstall.exe"

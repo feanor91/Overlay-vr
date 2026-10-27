@@ -27,34 +27,36 @@ Deux programmes, un seul fichier de zones (`%APPDATA%\OverlayVR\zones.json`) :
 
 ### Manettes Touch (éditeur)
 
+Chaque manette projette un **laser** ; la zone qu'il touche (elle devient blanche) est celle sur laquelle agissent les boutons.
+Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masquable au clic du stick gauche).
+
+**Main droite**
+
 | Action | Commande |
 |---|---|
-| Viser | Un **laser** part de la manette droite et touche un plan horizontal (le bureau). Le point visé et un petit carré blanc au sol indiquent où tu vises |
-| Régler la hauteur du bureau | Pose la manette droite sur le bureau et clique le stick droit (valeur mémorisée, 75 cm par défaut) |
-| Dessiner un **plan** | Gâchette droite maintenue : de l'angle A à l'angle opposé B au laser, relâche pour créer |
-| Dessiner un **volume** | Même emprise, puis lève la main pour régler la hauteur (stick droit pour affiner), gâchette pour valider, B pour annuler |
-| Volume (cyan) ou plan (jaune) | Bouton A (le bout de la manette change de couleur) |
-| Déplacer | Grip droit près d'une zone (à moins de 8 cm), puis bouge la main |
-| Tourner / agrandir-réduire | Grip maintenu + stick droit : X tourne, Y change la taille |
-| Supprimer | Grip maintenu + B |
-| Annuler la dernière zone | X (gauche) |
-| Affichage conditionnel | Y (gauche) : la zone n'apparaît que si tu regardes au moins 25° vers le bas (repère blanc au-dessus) |
-| Quitter | Menu (gauche) |
+| Tracer une zone | Gâchette, en 3 temps : (1) maintiens la gâchette et tire le **1er bord** de A à B, c'est lui qui donne l'**orientation** ; (2) vise le côté opposé, gâchette pour valider ; (3) pour un volume, lève la main pour la **hauteur** (stick ▲▼ pour affiner), gâchette pour valider. Un plan s'arrête à l'étape 2. B annule |
+| Volume (cyan) ou plan (jaune) | A |
+| Déplacer / orienter une zone | Grip tenu sur la zone visée, puis bouge la main et **tourne le poignet** ; stick ◄► tourne, ▲▼ agrandit/réduit |
+| Supprimer | B sur la zone visée (ou B pendant qu'on la tient) |
+| Hauteur du plan de visée | Pose la manette sur le bureau et clique le stick (mémorisée, 75 cm par défaut) |
+
+**Main gauche**
+
+| Action | Commande |
+|---|---|
+| Annuler | X (n'importe quelle action, plusieurs fois de suite) ; **maintenu 2 s : tout effacer** (X annule aussi ça) |
+| Affichage conditionnel | Y sur la zone visée : visible seulement si tu regardes au moins 25° vers le bas (repère blanc au-dessus) |
+| Objet actif | Stick ◄► : aucun (blanc), orange, vert, violet ; les nouvelles zones lui appartiennent |
+| Rattacher une zone à l'objet actif | Gâchette sur la zone visée |
+| Déplacer un objet entier | Grip tenu sur une de ses zones ; bouge la main et tourne le poignet |
+| Aide / quitter | Clic du stick : masque ou affiche l'aide ; Menu : quitter |
 
 ### Objets déplaçables (clavier, HOTAS…)
 
-Une zone peut appartenir à un **objet** (`objet1` à `objet3`, champ `object` du JSON). Tout l'objet se déplace d'un bloc,
-de sorte que tu peux dessiner les zones là où le matériel est au repos, puis les recaler quand tu le remets en place.
-
-| Action | Commande |
-|---|---|
-| Choisir l'objet actif | Clic du stick gauche : blanc = aucun (fixe), orange, vert, violet. Le bout de la manette gauche prend la couleur, les nouvelles zones appartiennent à cet objet |
-| Rattacher une zone existante | Gâchette gauche sur la zone (à l'objet actif ; blanc = la rendre fixe) |
-| Déplacer / tourner tout l'objet | Grip gauche près d'une de ses zones, puis bouge la main : toutes les zones suivent d'un bloc |
-
-Remise en place : lance l'éditeur, regarde ton clavier réel à travers le passthrough, attrape l'objet au grip gauche et
-glisse-le jusqu'à ce qu'il recouvre le vrai clavier. Tu le fais une fois à chaque installation du matériel ; il n'y a pas de
-suivi automatique, rien n'est lu pendant le jeu.
+Une zone peut appartenir à un **objet** (`objet1` à `objet3`, champ `object` du JSON). Tout l'objet se déplace d'un bloc :
+dessine les zones là où le matériel est au repos, puis recale-les quand tu le remets en place. Lance l'éditeur, regarde ton
+clavier réel à travers le passthrough, attrape l'objet au grip gauche et glisse-le jusqu'à ce qu'il le recouvre. Il n'y a pas
+de suivi automatique : rien n'est lu pendant le jeu.
 
 Le fichier `zones.json` est modifiable à la main (`pos`, `size` en mètres, `yaw` en radians, `look` en degrés).
 

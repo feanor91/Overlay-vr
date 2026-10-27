@@ -7,6 +7,9 @@ if(NOT WIN32)
   message(FATAL_ERROR "OverlayVR cible Windows (Virtual Desktop + VDXR).")
 endif()
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN)
+if(MSVC)
+  add_compile_options(/utf-8)  # textes accentues dans le code
+endif()
 
 include(FetchContent)
 FetchContent_Declare(openxr
@@ -30,7 +33,7 @@ add_custom_command(TARGET overlayvr_layer POST_BUILD
 add_executable(overlayvr_editor editor/editor.cpp)
 set_target_properties(overlayvr_editor PROPERTIES OUTPUT_NAME OverlayVR_Editor)
 target_link_libraries(overlayvr_editor PRIVATE OpenXR::headers OpenXR::openxr_loader
-  nlohmann_json::nlohmann_json d3d11 dxgi d3dcompiler dxguid)
+  nlohmann_json::nlohmann_json d3d11 dxgi d3dcompiler dxguid gdi32)
 
 # Scripts d'installation a cote de la DLL.
 add_custom_command(TARGET overlayvr_layer POST_BUILD
