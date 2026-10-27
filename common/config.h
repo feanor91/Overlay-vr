@@ -29,6 +29,9 @@ struct Config {
     float offset[3] = {0, 0, 0};  // decalage des zones pour les jeux SANS profil (metres), regle en jeu au clavier
     float offsetYawDeg = 0;       // rotation correspondante (degres) autour du centre des zones
     bool hotkeys = true;          // Ctrl+Alt+fleches... pour recaler les zones en jeu
+    std::string toggleKey = "space";      // touche clavier qui active / desactive les zones ("none" : aucune), ex. "ctrl+f9"
+    std::string toggleJoystick;           // morceau du nom du joystick / HOTAS ("" : n'importe lequel)
+    int toggleJoystickButton = 0;         // numero du bouton (comme dans joy.cpl, a partir de 1) ; 0 : aucun
     int edgePasses = 1;        // superpositions de chaque face (1 a 6). Plus de passes = bords plus propres mais plus de couches a composer (FPS)
     float overlapCm = 3.0f;    // les faces d'un volume se recouvrent de ce qu'il faut pour cacher les raccords
 };
@@ -51,6 +54,9 @@ inline bool loadConfig(Config& out) {
             for (int i = 0; i < 3; i++) c.offset[i] = j.at("offset").at(i).get<float>();
         c.offsetYawDeg = j.value("offset_yaw_deg", c.offsetYawDeg);
         c.hotkeys = j.value("hotkeys", c.hotkeys);
+        c.toggleKey = j.value("toggle_key", c.toggleKey);
+        c.toggleJoystick = j.value("toggle_joystick", c.toggleJoystick);
+        c.toggleJoystickButton = j.value("toggle_joystick_button", c.toggleJoystickButton);
         c.edgePasses = std::clamp(j.value("edge_passes", c.edgePasses), 1, 6);
         if (j.contains("profiles")) {
             c.profiles.clear();
@@ -96,7 +102,10 @@ inline bool saveConfig(const Config& c) {
                                   "gaze_only : les zones n'apparaissent que quand on les regarde (gaze_margin = tolerance en degres : le centre du regard doit viser la zone). "
                                   "edge_overlap_cm : recouvrement des faces, cache les lignes aux raccords. "
                                   "edge_passes : superpositions de chaque face (1 a 6), efface les liserés roses du contour. "
-                                  "hotkeys / offset : recalage des zones en jeu (Ctrl+Alt+fleches, voir le README)."},
+                                  "hotkeys / offset : recalage des zones en jeu (Ctrl+Alt+fleches, voir le README). "
+                                  "toggle_key : touche qui active / desactive les zones en jeu (space, f9, ctrl+f9, none...). "
+                                  "toggle_joystick_button : numero du bouton du joystick / HOTAS (numerotation de joy.cpl, a partir de 1 ; 0 : aucun) ; "
+                                  "toggle_joystick : morceau du nom du peripherique (vide : n'importe lequel, voir layer.log)."},
                         {"enabled", c.enabled},
                         {"mode", c.mode},
                         {"apps", c.apps},
@@ -106,6 +115,9 @@ inline bool saveConfig(const Config& c) {
                         {"edge_overlap_cm", c.overlapCm},
                         {"edge_passes", c.edgePasses},
                         {"hotkeys", c.hotkeys},
+                        {"toggle_key", c.toggleKey},
+                        {"toggle_joystick", c.toggleJoystick},
+                        {"toggle_joystick_button", c.toggleJoystickButton},
                         {"offset", {c.offset[0], c.offset[1], c.offset[2]}},
                         {"offset_yaw_deg", c.offsetYawDeg}}
              .dump(2);

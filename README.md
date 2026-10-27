@@ -102,6 +102,29 @@ légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :
 Le décalage est **propre à chaque jeu** (profil) : recaler MSFS ne touche pas Assetto Corsa. Il est enregistré dans `settings.json`
 (champs `offset` / `offset_yaw_deg` du profil) quelques instants après avoir relâché les touches. `"hotkeys": false` désactive ces raccourcis.
 
+## Activer / désactiver les zones en jeu (touche ou bouton de HOTAS)
+
+Comme le clic gauche sur l'icône de la barre d'état, mais sans quitter le casque : une touche du clavier et/ou un bouton de ton
+joystick / HOTAS inversent l'interrupteur général (`enabled` de `settings.json`, donc l'icône de la barre d'état suit). Réglages
+relus à chaud, dans `%APPDATA%\OverlayVR\settings.json` :
+
+```json
+"toggle_key": "space",
+"toggle_joystick": "Throttle",
+"toggle_joystick_button": 12
+```
+
+| Réglage | Valeurs |
+|---|---|
+| `toggle_key` (défaut `"space"`) | `space`, `enter`, `tab`, `f1`…`f24`, `a`…`z`, `0`…`9`, `numpad0`…`numpad9`, `insert`, `delete`, `home`, `end`, `pageup`, `pagedown`, flèches `up`/`down`/`left`/`right`. Modificateurs possibles : `ctrl+f9`, `ctrl+alt+x`, `shift+space`. `"none"` : désactivé |
+| `toggle_joystick_button` (défaut `0` : aucun) | Numéro du bouton, tel que l'affiche *Configurer les contrôleurs de jeu USB* (`joy.cpl` → Propriétés), à partir de 1 (jusqu'à 128) |
+| `toggle_joystick` (défaut `""`) | Morceau du nom du périphérique, sans tenir compte des majuscules (`"Throttle"`, `"Warthog"`, `"VPC"`…). Vide : le bouton est cherché sur tous les joysticks. Les noms exacts sont dans `layer.log` (lignes « joystick détecté ») |
+
+- Le joystick est lu en arrière-plan, sans exclusivité (DirectInput) : MSFS garde ses propres assignations, et le bouton choisi
+  peut donc servir aussi à autre chose dans le jeu.
+- La touche est lue globalement (même si le jeu n'a pas le focus). Les deux ne basculent que dans un jeu concerné par la couche.
+- Un HOTAS branché après le lancement du jeu est repris dans les 10 secondes.
+
 ## Zones par jeu
 
 Chaque jeu est un **profil** dans `settings.json` (`MSFS` et `Assetto Corsa` par défaut), avec la liste de ses exe :
