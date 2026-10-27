@@ -49,6 +49,7 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 | Objet actif | Stick ◄► : aucun (blanc), orange, vert, violet ; les nouvelles zones lui appartiennent |
 | Rattacher une zone à l'objet actif | Gâchette sur la zone visée |
 | Déplacer un objet entier | Grip tenu sur une de ses zones ; bouge la main et tourne le poignet |
+| **Recaler toutes les zones** (elles sont toutes décalées) | Grip gauche **dans le vide** (laser sur aucune zone) : toutes les zones suivent ta main d'un bloc, poignet compris ; pendant ce geste, stick droit ◄► pour tourner finement, ▲▼ pour avancer/reculer |
 | Aide / quitter | Clic du stick : masque l'aide, ou la ré-affiche **devant toi** (les panneaux restent fixes dans la pièce, ils ne suivent pas la tête) ; Menu : quitter |
 
 ### Objets déplaçables (clavier, HOTAS…)
@@ -93,6 +94,22 @@ Si un léger liseré rose subsiste, augmente aussi la tolérance de la couleur d
 
 Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Journal de la couche ») : la ligne
 `couche chargée dans XXX.exe` donne le nom exact à copier dans `apps` (le nom de l'application OpenXR marche aussi).
+
+## Recaler les zones en jeu (au clavier)
+
+Le repère de la pièce n'est pas toujours exactement le même d'une session à l'autre : toutes les zones peuvent se retrouver
+légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :
+
+| Touche (avec Ctrl+Alt) | Effet |
+|---|---|
+| ↑ ↓ ← → | Avancer / reculer / gauche / droite, selon la direction où tu regardes |
+| Page haut / Page bas | Monter / descendre |
+| Inser / Suppr | Tourner vers la droite / vers la gauche |
+| Origine | Tout remettre à zéro |
+| + Maj | Pas plus grands (15 cm/s et 15°/s au lieu de 3 cm/s et 3°/s) |
+
+Le décalage est enregistré dans `settings.json` (`offset`, `offset_yaw_deg`) quelques instants après avoir relâché les touches ;
+l'éditeur l'intègre aux zones au lancement suivant. `"hotkeys": false` désactive ces raccourcis.
 
 ## Application de la barre d'état
 

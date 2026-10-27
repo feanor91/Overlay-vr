@@ -137,18 +137,29 @@ struct State {
     ULONGLONG lastCheck = 0;
     ovz::Config cfg;
     std::string exeName, appName;
+    std::vector<ovz::Zone> shown;  // zones chargees + decalage global
+    ULONGLONG lastTick = 0, lastKeyChange = 0;
+    bool offsetDirty = false;
     std::unordered_map<std::string, bool> gazeShown;  // hysteresis : zone actuellement affichee ou non
     bool active = true;  // reglages utilisateur : la couche dessine-t-elle dans ce jeu ?
 } g;
 
 // --- reglages et zones (rechargees a chaud) -----------------------------------------------------
+void rebuildShown() {
+    g.shown = g.zones;
+    ovz::applyOffset(g.shown, g.cfg.offset, g.cfg.offsetYawDeg);
+}
+
 void refreshConfig() {
     WIN32_FILE_ATTRIBUTE_DATA attr;
     if (GetFileAttributesExW(ovz::configPath().c_str(), GetFileExInfoStandard, &attr) &&
         CompareFileTime(&attr.ftLastWriteTime, &g.configStamp) != 0) {
         g.configStamp = attr.ftLastWriteTime;
         ovz::Config c;
-        if (ovz::loadConfig(c)) g.cfg = c;
+        if (ovz::loadConfig(c)) {
+            g.cfg = c;
+            rebuildShown();
+        }
     }
     bool now = ovz::appAllowed(g.cfg, g.exeName, g.appName);
     if (now != g.active) logf("%s (%s) : couche %s", g.exeName.c_str(), g.appName.c_str(), now ? "ACTIVE" : "inactive");
@@ -165,12 +176,16 @@ void refreshZones() {
     WIN32_FILE_ATTRIBUTE_DATA attr;
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attr)) {
         g.zones.clear();
+        g.shown.clear();
         g.zonesStamp = {};
         return;
     }
     if (CompareFileTime(&attr.ftLastWriteTime, &g.zonesStamp) == 0) return;
     g.zonesStamp = attr.ftLastWriteTime;
-    if (ovz::loadZones(path, g.zones)) logf("%zu zone(s) chargee(s)", g.zones.size());
+    if (ovz::loadZones(path, g.zones)) {
+        rebuildShown();
+        logf("%zu zone(s) chargee(s)", g.zones.size());
+    }
 }
 
 // --- swapchain magenta ----------------------------------------------------------------------
@@ -423,11 +438,60 @@ bool inGaze(const ovz::Zone& z, V3 head, V3 fwd) {
     return hit;
 }
 
+// Recalage en jeu, au clavier : Ctrl+Alt + fleches (avancer/reculer/gauche/droite selon la direction de la tete),
+// PageHaut/PageBas (hauteur), Inser/Suppr (rotation), Origine (remise a zero). Maj = pas plus grands.
+// Le decalage est enregistre dans settings.json une fois les touches relachees.
+void updateHotkeys(V3 fwd) {
+    const ULONGLONG now = GetTickCount64();
+    const float dt = g.lastTick ? std::min(0.1f, (now - g.lastTick) / 1000.0f) : 0.0f;
+    g.lastTick = now;
+    auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+    bool changed = false;
+    if (down(VK_CONTROL) && down(VK_MENU)) {
+        const float move = (down(VK_SHIFT) ? 0.15f : 0.03f) * dt, turn = (down(VK_SHIFT) ? 15.0f : 3.0f) * dt;
+        V3 f = {fwd.x, 0, fwd.z};
+        const float n = ovm::length(f);
+        f = n > 1e-3f ? f * (1.0f / n) : V3{0, 0, -1};
+        const V3 right = {-f.z, 0, f.x};
+        V3 d;
+        if (down(VK_UP)) d = d + f * move;
+        if (down(VK_DOWN)) d = d - f * move;
+        if (down(VK_RIGHT)) d = d + right * move;
+        if (down(VK_LEFT)) d = d - right * move;
+        if (down(VK_PRIOR)) d.y += move;
+        if (down(VK_NEXT)) d.y -= move;
+        float dyaw = 0;
+        if (down(VK_DELETE)) dyaw += turn;
+        if (down(VK_INSERT)) dyaw -= turn;
+        if (down(VK_HOME)) {
+            g.cfg.offset[0] = g.cfg.offset[1] = g.cfg.offset[2] = 0;
+            g.cfg.offsetYawDeg = 0;
+            changed = true;
+        }
+        if (d.x != 0 || d.y != 0 || d.z != 0 || dyaw != 0) {
+            g.cfg.offset[0] += d.x;
+            g.cfg.offset[1] += d.y;
+            g.cfg.offset[2] += d.z;
+            g.cfg.offsetYawDeg += dyaw;
+            changed = true;
+        }
+    }
+    if (changed) {
+        rebuildShown();
+        g.offsetDirty = true;
+        g.lastKeyChange = now;
+    } else if (g.offsetDirty && now - g.lastKeyChange > 800) {  // touches relachees : on enregistre
+        ovz::saveConfig(g.cfg);
+        g.offsetDirty = false;
+        logf("decalage enregistre : %.3f %.3f %.3f m, %.1f deg", g.cfg.offset[0], g.cfg.offset[1], g.cfg.offset[2], g.cfg.offsetYawDeg);
+    }
+}
+
 XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     if (g.disabled || session != g.session || g.api == Api::None) return nx.EndFrame(session, info);
 
     refreshZones();
-    if (!g.active || g.zones.empty() || !ensureSwapchain()) return nx.EndFrame(session, info);
+    if (!g.active || g.shown.empty() || !ensureSwapchain()) return nx.EndFrame(session, info);
 
     // Pose de la tete dans le repere STAGE, pour l'affichage conditionnel et le choix des faces.
     XrSpaceLocation loc = {XR_TYPE_SPACE_LOCATION};
@@ -444,9 +508,11 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
         pitchDown = std::asin(std::clamp(-fy, -1.0f, 1.0f)) * 180.0f / ovm::kPi;
     }
 
+    if (g.cfg.hotkeys && haveHead) updateHotkeys(fwd);
+
     std::vector<XrCompositionLayerQuad> quads;
-    quads.reserve(g.zones.size() * 3 + 8);
-    for (const ovz::Zone& z : g.zones) {
+    quads.reserve(g.shown.size() * 3 + 8);
+    for (const ovz::Zone& z : g.shown) {
         if (!z.enabled) continue;
         if (z.look > 0 && haveHead && pitchDown < z.look) continue;
         if (g.cfg.gazeOnly && haveHead && !inGaze(z, head, fwd)) continue;

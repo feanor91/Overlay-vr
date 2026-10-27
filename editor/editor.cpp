@@ -114,6 +114,7 @@ public:
         ovz::loadZones(ovz::zonesPath(), zones_);
         loadSettings();
         ovz::ensureConfigFile();
+        bakeGameOffset();
         std::printf("OverlayVR editeur - %zu zone(s) chargee(s) depuis %s\n", zones_.size(),
                     ovz::zonesPath().string().c_str());
         initOpenXR();
@@ -197,6 +198,7 @@ private:
         int hand = 1;
         V3 hand0;
         float heading0 = 0, extraYaw = 0, scale = 1, heightScale = 1;
+        V3 nudge;  // reglage fin au stick droit pendant la saisie a la main gauche
         std::vector<Saved> items;
     } grab_;
 
@@ -257,7 +259,7 @@ private:
         adapter->Release();
         factory->Release();
         rend_.init(dev_, ctx_);
-        help_.init(dev_, ctx_, 820, 420);
+        help_.init(dev_, ctx_, 820, 460);
         status_.init(dev_, ctx_, 820, 112);
     }
 
@@ -484,6 +486,20 @@ private:
         }
     }
 
+    // Le recalage fait en jeu (Ctrl+Alt+fleches) est integre aux zones, puis remis a zero.
+    void bakeGameOffset() {
+        ovz::Config c;
+        if (!ovz::loadConfig(c)) return;
+        const bool moved = c.offset[0] != 0 || c.offset[1] != 0 || c.offset[2] != 0 || c.offsetYawDeg != 0;
+        if (!moved) return;
+        ovz::applyOffset(zones_, c.offset, c.offsetYawDeg);
+        c.offset[0] = c.offset[1] = c.offset[2] = 0;
+        c.offsetYawDeg = 0;
+        ovz::saveConfig(c);
+        save();
+        std::printf("Recalage fait en jeu integre aux zones\n");
+    }
+
     // --- donnees : enregistrement, historique, reglages ---------------------------------------------
     void save() { ovz::saveZones(ovz::zonesPath(), zones_); }
 
@@ -603,10 +619,11 @@ private:
         grab_.hand = hand;
         grab_.hand0 = hands_[hand].pos;
         grab_.heading0 = headingOf(hands_[hand].aimRot);
-        const std::string obj = zones_[zoneIndex].object;
+        const std::string obj = zoneIndex >= 0 ? zones_[zoneIndex].object : std::string();
         for (size_t i = 0; i < zones_.size(); i++) {
             // Main gauche : tout l'objet. Main droite : la seule zone visee.
-            const bool take = (hand == 0 && !obj.empty()) ? zones_[i].object == obj : static_cast<int>(i) == zoneIndex;
+            // Main gauche : tout l'objet, ou TOUTES les zones si on n'en vise aucune. Main droite : la seule zone visee.
+            const bool take = zoneIndex < 0 ? true : (hand == 0 && !obj.empty()) ? zones_[i].object == obj : static_cast<int>(i) == zoneIndex;
             if (!take) continue;
             const Zone& z = zones_[i];
             grab_.items.push_back({i, {z.pos[0], z.pos[1], z.pos[2]}, z.yaw, {z.size[0], z.size[1], z.size[2]}});
@@ -640,11 +657,22 @@ private:
             stickState(0, lx, ly);  // stick gauche haut/bas : hauteur seule (volumes)
             if (std::fabs(ly) > 0.15f) grab_.heightScale = std::clamp(grab_.heightScale * (1.0f + ly * dt * 0.8f), 0.2f, 5.0f);
         }
+        if (grab_.hand == 0) {  // stick droit : fin reglage de l'orientation (◄►) et avance/recul (▲▼)
+            float sx, sy;
+            stickState(1, sx, sy);
+            if (std::fabs(sx) > 0.15f) grab_.extraYaw += sx * dt * 0.5f;
+            if (std::fabs(sy) > 0.15f) {
+                V3 f = ovm::qrot(headRot_, V3{0, 0, -1});
+                f.y = 0;
+                const float n = ovm::length(f);
+                if (n > 1e-3f) grab_.nudge = grab_.nudge + f * (sy * dt * 0.15f / n);
+            }
+        }
         const float dyaw = headingOf(h.aimRot) - grab_.heading0 + grab_.extraYaw;
         const Q rot = ovm::qaxis('y', dyaw);
         V3 centroid;
         for (const Saved& s : grab_.items) centroid = centroid + s.pos * (1.0f / static_cast<float>(grab_.items.size()));
-        const V3 delta = h.pos - grab_.hand0;
+        const V3 delta = h.pos - grab_.hand0 + grab_.nudge;
         for (const Saved& s : grab_.items) {
             if (s.index >= zones_.size()) continue;
             Zone& z = zones_[s.index];
@@ -810,7 +838,7 @@ private:
                 save();
             }
             if (in_.gripR.down() && hover_[1] >= 0 && rh.tracked && rh.aimTracked) startGrab(1, hover_[1]);
-            if (in_.gripL.down() && hover_[0] >= 0 && lh.tracked && lh.aimTracked) startGrab(0, hover_[0]);
+            if (in_.gripL.down() && lh.tracked && lh.aimTracked && (hover_[0] >= 0 || !zones_.empty())) startGrab(0, hover_[0]);  // dans le vide : tout
             if (in_.y.down() && hover_[0] >= 0) {  // affichage conditionnel de la zone visee
                 pushHistory();
                 Zone& z = zones_[hover_[0]];
@@ -886,6 +914,8 @@ private:
             L"Stick ◄► : objet actif (aucun, orange, vert, violet)",
             L"Gâchette sur une zone visée : la rattacher à l'objet actif",
             L"Grip tenu sur une zone d'un objet : déplacer l'objet entier",
+            L"Grip tenu dans le vide : déplacer TOUTES les zones (recalage) ;",
+            L"     stick droit pendant ce geste : ◄► tourne fin, ▲▼ avance/recule",
             L"Clic stick : masquer / replacer l'aide devant toi         Menu : quitter",
         });
     }
@@ -929,7 +959,7 @@ private:
         const Mat4 hud = ovm::mFromPose(hudPos_, ovm::qaxis('y', hudYaw_));
         const float w = 0.65f;
         rend_.panel(ovm::mmul(hud, ovm::mmul(ovm::mTranslate({0, showHelp_ ? 0.235f : 0.0f, 0}), ovm::mScale({w, w * 112 / 820, 1}))), status_.srv());
-        if (showHelp_) rend_.panel(ovm::mmul(hud, ovm::mScale({w, w * 420 / 820, 1})), help_.srv());
+        if (showHelp_) rend_.panel(ovm::mmul(hud, ovm::mScale({w, w * 460 / 820, 1})), help_.srv());
     }
 
     void frame() {
