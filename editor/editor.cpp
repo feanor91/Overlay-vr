@@ -163,6 +163,7 @@ struct Renderer {
         ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         ctx->VSSetShader(vs, nullptr, 0);
         ctx->VSSetConstantBuffers(0, 1, &cb);
+        ctx->PSSetConstantBuffers(0, 1, &cb);  // le pixel shader lit `color` : sans ca tout est transparent
         ctx->PSSetShader(ps, nullptr, 0);
         ctx->RSSetState(raster);
         ctx->OMSetBlendState(blend, nullptr, 0xffffffff);
