@@ -32,7 +32,8 @@ namespace {
 enum : int {
     ID_ENABLED = 100, ID_KEYTXT, ID_KEYSET, ID_KEYNONE, ID_JOYDEV, ID_JOYSCAN, ID_BTNTXT, ID_BTNDETECT, ID_BTNNONE,
     ID_LIVE, ID_HINT, ID_GAZE, ID_MARGIN, ID_PASSES, ID_OVERLAP, ID_HOTKEYS, ID_MODE, ID_APPS, ID_SAVE, ID_CLOSE, ID_SAVED,
-    ID_TAB, ID_ZLIST, ID_ASSIGN, ID_ASSIGNBTN, ID_ZRELOAD, ID_PLIST, ID_PNAME, ID_PEXE, ID_PNEW, ID_PADD, ID_PDEL
+    ID_TAB, ID_ZLIST, ID_ASSIGN, ID_ASSIGNBTN, ID_ZRELOAD, ID_PLIST, ID_PNAME, ID_PEXE, ID_PNEW, ID_PADD, ID_PDEL,
+    ID_ZNAME, ID_ZRENAME
 };
 constexpr UINT_PTR kTimer = 1;
 
@@ -393,6 +394,54 @@ void retargetZones(const std::string& from, const std::string& to) {
     if (changed) ovz::saveZones(ovz::zonesPath(), fresh);
 }
 
+// Une seule zone selectionnee : son nom passe dans le champ de renommage.
+void zoneSelectionChanged() {
+    HWND lv = ctl(ID_ZLIST);
+    if (ListView_GetSelectedCount(lv) != 1) return;
+    const int i = ListView_GetNextItem(lv, -1, LVNI_SELECTED);
+    if (i >= 0 && i < static_cast<int>(g_zones.size())) setText(ID_ZNAME, W(g_zones[i].name));
+}
+
+void renameZone() {
+    HWND lv = ctl(ID_ZLIST);
+    if (ListView_GetSelectedCount(lv) != 1) {
+        say(L"Sélectionne une seule zone dans la liste pour la renommer.");
+        return;
+    }
+    const int sel = ListView_GetNextItem(lv, -1, LVNI_SELECTED);
+    const std::string name = U(trimmed(getText(ID_ZNAME)));
+    if (name.empty() || sel < 0 || sel >= static_cast<int>(g_zones.size())) {
+        say(L"Donne un nom à la zone.");
+        return;
+    }
+    const std::string old = g_zones[sel].name;
+    std::vector<ovz::Zone> fresh;
+    if (!ovz::loadZones(ovz::zonesPath(), fresh)) {
+        say(L"Impossible de lire zones.json.");
+        return;
+    }
+    int target = sel < static_cast<int>(fresh.size()) && fresh[sel].name == old ? sel : -1;
+    for (int i = 0; i < static_cast<int>(fresh.size()); i++) {
+        if (target < 0 && fresh[i].name == old) target = i;
+        if (i != target && fresh[i].name == name && name != old) {
+            say(L"Une autre zone porte déjà ce nom.");
+            return;
+        }
+    }
+    if (target < 0) {
+        say(L"Zone introuvable : clique « Recharger ».");
+        return;
+    }
+    fresh[target].name = name;
+    if (!ovz::saveZones(ovz::zonesPath(), fresh)) {
+        say(L"Échec de l'enregistrement de zones.json.");
+        return;
+    }
+    refreshZones();
+    ListView_SetItemState(lv, target, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    say(L"Zone « " + W(old) + L" » renommée en « " + W(name) + L" ».");
+}
+
 void profileSelected() {
     const int i = static_cast<int>(SendMessageW(ctl(ID_PLIST), LB_GETCURSEL, 0, 0));
     if (i < 0 || i >= static_cast<int>(g_profiles.size())) return;
@@ -524,7 +573,7 @@ void build() {
     // --- onglet « Zones et jeux » ---
     g_cur = &g_tabs[1];
     group(L"Zones tracées dans le casque", 10, 10, 580, 270);
-    make(L"SysListView32", L"", LVS_REPORT | LVS_SHOWSELALWAYS | WS_TABSTOP, 24, 34, 552, 170, ID_ZLIST, WS_EX_CLIENTEDGE);
+    make(L"SysListView32", L"", LVS_REPORT | LVS_SHOWSELALWAYS | WS_TABSTOP, 24, 34, 552, 140, ID_ZLIST, WS_EX_CLIENTEDGE);
     HWND lv = ctl(ID_ZLIST);
     ListView_SetExtendedListViewStyle(lv, LVS_EX_FULLROWSELECT);
     const wchar_t* cols[] = {L"Zone", L"Type", L"Jeu"};
@@ -536,6 +585,9 @@ void build() {
         col.cx = S(widths[i]);
         ListView_InsertColumn(lv, i, &col);
     }
+    label(L"Nom de la zone", 24, 182, 110);
+    edit(140, 182, 260, ID_ZNAME);
+    button(L"Renommer", 410, 181, 166, ID_ZRENAME);
     label(L"Affecter la sélection à :", 24, 214, 170);
     make(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 200, 214, 200, 200, ID_ASSIGN);
     button(L"Affecter", 410, 213, 80, ID_ASSIGNBTN);
@@ -612,6 +664,9 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_joyButton = 0;
                     refreshTexts();
                     break;
+                case ID_ZRENAME:
+                    renameZone();
+                    break;
                 case ID_ASSIGNBTN:
                     assignZones();
                     break;
@@ -643,6 +698,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_NOTIFY:
+            if (reinterpret_cast<NMHDR*>(lp)->idFrom == ID_ZLIST && reinterpret_cast<NMHDR*>(lp)->code == LVN_ITEMCHANGED) {
+                const NMLISTVIEW* nm = reinterpret_cast<NMLISTVIEW*>(lp);
+                if ((nm->uChanged & LVIF_STATE) && ((nm->uNewState ^ nm->uOldState) & LVIS_SELECTED)) zoneSelectionChanged();
+            }
             if (reinterpret_cast<NMHDR*>(lp)->idFrom == ID_TAB && reinterpret_cast<NMHDR*>(lp)->code == TCN_SELCHANGE)
                 showTab(TabCtrl_GetCurSel(ctl(ID_TAB)));
             return 0;

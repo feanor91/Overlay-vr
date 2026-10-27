@@ -140,6 +140,11 @@ une ou plusieurs zones (Ctrl / Maj), choisis le jeu (ou « Tous les jeux ») et 
 dans `zones.json` et pris en compte en jeu. Le même onglet permet d'ajouter, renommer ou supprimer un jeu (nom + exécutables).
 Ferme l'éditeur du casque avant d'affecter, sinon il peut réécrire `zones.json`.
 
+**Nommer les zones** : à la création, dès qu'une zone est tracée dans le casque, le panneau demande son nom : tape-le sur le
+clavier du PC puis **Entrée** (Retour arrière corrige, **Échap** garde le nom par défaut `plan1`, `volume2`…). Sans rien taper,
+la proposition disparaît au bout de 20 s. Après coup, sélectionne la zone dans l'onglet *Zones et jeux*, change son nom et clique
+**Renommer**. Les noms sont uniques (un doublon reçoit un numéro dans l'éditeur, est refusé dans la fenêtre).
+
 Chaque jeu est un **profil** dans `settings.json` (`MSFS` et `Assetto Corsa` par défaut), avec la liste de ses exe :
 
 ```json

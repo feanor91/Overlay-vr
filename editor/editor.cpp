@@ -152,6 +152,13 @@ private:
     V3 hit_;                  // point vise sur ce plan (main droite)
     bool hasHit_ = false;
     int counter_ = 1;
+    // Nommage d'une zone qui vient d'etre tracee : on tape le nom au clavier, Entree valide, Echap garde le nom par defaut.
+    int namingIdx_ = -1;
+    std::string namingOrig_;
+    std::wstring namingBuf_;
+    bool namingTyped_ = false;
+    ULONGLONG namingStart_ = 0;
+    bool keyPrev_[256] = {};
     std::vector<std::string> profileNames_ = {std::string()};
     int curProfile_ = 0, prevFlickY_ = 0;
 
@@ -711,6 +718,82 @@ private:
         std::printf("Zone '%s' creee : %.2f x %.2f x %.2f m (%zu au total)\n", preview_.name.c_str(), preview_.size[0],
                     preview_.size[1], preview_.size[2], zones_.size());
         cancelDrawing();
+        startNaming();
+    }
+
+    void startNaming() {
+        namingIdx_ = static_cast<int>(zones_.size()) - 1;
+        namingOrig_ = zones_.back().name;
+        namingBuf_.clear();
+        namingTyped_ = false;
+        namingStart_ = GetTickCount64();
+        for (int vk = 0; vk < 256; vk++) keyPrev_[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0;
+    }
+
+    std::string uniqueName(const std::string& wanted, int except) const {
+        auto taken = [&](const std::string& n) {
+            for (int i = 0; i < static_cast<int>(zones_.size()); i++)
+                if (i != except && zones_[i].name == n) return true;
+            return false;
+        };
+        if (!taken(wanted)) return wanted;
+        for (int k = 2;; k++) {
+            const std::string c = wanted + " " + std::to_string(k);
+            if (!taken(c)) return c;
+        }
+    }
+
+    // Lit le clavier du PC (le casque est pose sur la tete mais le clavier reste a portee) pendant 20 s apres le trace.
+    void pollNaming() {
+        if (namingIdx_ < 0) return;
+        if (namingIdx_ >= static_cast<int>(zones_.size()) || zones_[namingIdx_].name != namingOrig_) {  // annule / supprime entre-temps
+            namingIdx_ = -1;
+            return;
+        }
+        if (!namingTyped_ && GetTickCount64() - namingStart_ > 20000) {
+            namingIdx_ = -1;
+            return;
+        }
+        auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+        BYTE state[256] = {};
+        if (down(VK_SHIFT)) state[VK_SHIFT] = 0x80;
+        if (down(VK_CONTROL)) state[VK_CONTROL] = 0x80;
+        if (down(VK_MENU)) state[VK_MENU] = 0x80;
+        if (GetKeyState(VK_CAPITAL) & 1) state[VK_CAPITAL] = 1;
+        const HKL layout = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), nullptr));
+        for (int vk = 0x08; vk <= 0xFE; vk++) {
+            const bool now = down(vk);
+            const bool pressed = now && !keyPrev_[vk];
+            keyPrev_[vk] = now;
+            if (!pressed || vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || (vk >= 0xA0 && vk <= 0xA5)) continue;
+            if (vk == VK_ESCAPE) {
+                namingIdx_ = -1;
+                return;
+            }
+            if (vk == VK_RETURN) {
+                size_t a = namingBuf_.find_first_not_of(L" "), b = namingBuf_.find_last_not_of(L" ");
+                if (a != std::wstring::npos) {
+                    const std::wstring w = namingBuf_.substr(a, b - a + 1);
+                    char name[512] = {};
+                    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, name, sizeof name - 1, nullptr, nullptr);
+                    zones_[namingIdx_].name = uniqueName(name, namingIdx_);
+                    save();
+                    std::printf("Zone '%s' renommee '%s'\n", namingOrig_.c_str(), zones_[namingIdx_].name.c_str());
+                }
+                namingIdx_ = -1;
+                return;
+            }
+            if (vk == VK_BACK) {
+                if (!namingBuf_.empty()) namingBuf_.pop_back();
+                continue;
+            }
+            wchar_t out[8] = {};
+            const int n = ToUnicodeEx(vk, MapVirtualKeyW(vk, MAPVK_VK_TO_VSC), state, out, 8, 0x4, layout);
+            if (n == 1 && out[0] >= 32 && namingBuf_.size() < 40) {
+                namingBuf_ += out[0];
+                namingTyped_ = true;
+            }
+        }
     }
 
     void updateDrawing() {
@@ -869,6 +952,7 @@ private:
         }
         updateGrab(dt);
         updateDrawing();
+        pollNaming();
         updateHud();
     }
 
@@ -907,6 +991,11 @@ private:
             case Phase::Bottom: hint = L"4/4 Descends la manette au BAS de l'objet (ou valide : bas = plan de visée), gâchette"; break;
         }
         if (xHold_ > 0.6f && in_.x.now && !xCleared_) hint = L"!Maintiens X… tout va être effacé";
+        if (namingIdx_ >= 0) {
+            const std::wstring keep = L"Échap : garder « " + widen(namingOrig_) + L" »";
+            hint = namingTyped_ ? L"Nom : " + namingBuf_ + L"_     (Entrée valide, " + keep + L")"
+                                : L"Zone créée : tape son nom au clavier puis Entrée (" + keep + L")";
+        }
         char buf[64];
         std::snprintf(buf, sizeof buf, "%d zone(s)   |   bureau à %.2f m", static_cast<int>(zones_.size()), surfaceY_);
         status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : L"VOLUME") + L"   |   Jeu actif : " +
