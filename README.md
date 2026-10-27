@@ -84,8 +84,8 @@ Autres réglages du même fichier :
 
 | Réglage | Effet |
 |---|---|
-| `gaze_only: true` (défaut) | Une zone n'apparaît que **quand tu la regardes** (orientation de la tête, pas de suivi des yeux) ; `false` : toujours visibles |
-| `gaze_h: 35` / `gaze_v: 18` | Demi-angles horizontal et vertical (en degrés) autour de ton regard : une partie de la zone doit y tomber. Le vertical est plus serré, lever un peu la tête suffit à cacher les zones basses. Plus grand = elles apparaissent plus tôt |
+| `gaze_only: true` (défaut) | Une zone n'apparaît que **quand ton regard pointe vers elle** : un rayon part du centre de ta vue (orientation de la tête, pas de suivi des yeux) et doit croiser la zone ; `false` : toujours visibles |
+| `gaze_margin: 8` | Tolérance en degrés autour de la zone. Plus petit = il faut viser plus précisément ; plus grand = elle apparaît plus tôt. Une fois affichée, elle reste visible 4° de plus |
 | `edge_overlap_cm: 3` | Recouvrement des faces d'un volume : cache les lignes roses aux raccords |
 | `edge_passes: 3` | Chaque face est superposée n fois (1 à 6) : les pixels de bord, partiellement magenta, le deviennent presque entièrement, ce qui efface les liserés roses du contour. Réduis si tu as beaucoup de zones |
 
