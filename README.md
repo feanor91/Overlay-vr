@@ -84,12 +84,12 @@ Autres réglages du même fichier :
 
 | Réglage | Effet |
 |---|---|
-| `gaze_only: true` (défaut) | Une zone n'apparaît que **quand tu la regardes** (direction de la tête, pas de suivi des yeux) ; `false` : toujours visibles |
-| `gaze_angle: 25` | Angle en degrés autour du regard (compté depuis le bord de la zone). Plus grand = apparaît plus tôt |
-| `edge_overlap_cm: 2` | Recouvrement des faces d'un volume : cache les lignes roses aux raccords. À augmenter si des lignes restent |
+| `gaze_only: true` (défaut) | Une zone n'apparaît que **quand tu la regardes** (orientation de la tête, pas de suivi des yeux) ; `false` : toujours visibles |
+| `gaze_h: 35` / `gaze_v: 18` | Demi-angles horizontal et vertical (en degrés) autour de ton regard : une partie de la zone doit y tomber. Le vertical est plus serré, lever un peu la tête suffit à cacher les zones basses. Plus grand = elles apparaissent plus tôt |
+| `edge_overlap_cm: 3` | Recouvrement des faces d'un volume : cache les lignes roses aux raccords |
+| `edge_passes: 3` | Chaque face est superposée n fois (1 à 6) : les pixels de bord, partiellement magenta, le deviennent presque entièrement, ce qui efface les liserés roses du contour. Réduis si tu as beaucoup de zones |
 
-Les fins liserés roses qui peuvent rester sur le contour des fenêtres viennent du mélange magenta/image sur les bords (et de la
-compression vidéo). Si ça te gêne, augmente la tolérance de la couleur du chroma key dans Virtual Desktop.
+Si un léger liseré rose subsiste, augmente aussi la tolérance de la couleur du chroma key dans Virtual Desktop.
 
 Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Journal de la couche ») : la ligne
 `couche chargée dans XXX.exe` donne le nom exact à copier dans `apps` (le nom de l'application OpenXR marche aussi).

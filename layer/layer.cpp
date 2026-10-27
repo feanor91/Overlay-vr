@@ -393,22 +393,33 @@ XrResult XRAPI_CALL ovDestroySession(XrSession session) {
     return nx.DestroySession(session);
 }
 
-// Vrai si la zone est dans la direction du regard (tete). Marge de 8 degres une fois affichee pour eviter le clignotement.
-bool inGaze(const ovz::Zone& z, V3 head, V3 fwd) {
+// Vrai si une partie de la zone tombe dans la fenetre du regard (demi-angles horizontal et vertical autour de l'axe
+// de la tete). On teste des points repartis dans la zone, pas une sphere englobante : lever la tete suffit a la cacher.
+// Une marge de 5 degres s'ajoute quand la zone est deja affichee, pour eviter le clignotement.
+bool inGaze(const ovz::Zone& z, V3 head, Q headQ) {
+    const bool shown = g.gazeShown[z.name];
+    const float maxH = g.cfg.gazeH + (shown ? 5.0f : 0.0f), maxV = g.cfg.gazeV + (shown ? 5.0f : 0.0f);
+    const bool plane = z.type == ovz::ZoneType::Plane;
+    const Q yaw = ovm::qaxis('y', z.yaw);
+    const Q inv = ovm::qconj(headQ);
     const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
-    const V3 d = c - head;
-    const float dist = ovm::length(d);
-    const float radius = 0.5f * std::sqrt(z.size[0] * z.size[0] + z.size[1] * z.size[1] + z.size[2] * z.size[2]);
-    bool shown = g.gazeShown[z.name];
-    bool visible;
-    if (dist <= radius) {
-        visible = true;  // la tete est dans la zone
-    } else {
-        const float cosA = std::clamp(ovm::dot(fwd, d * (1.0f / dist)), -1.0f, 1.0f);
-        const float angle = std::acos(cosA) * 180.0f / ovm::kPi;
-        const float angRadius = std::asin(std::min(1.0f, radius / dist)) * 180.0f / ovm::kPi;
-        visible = angle - angRadius < g.cfg.gazeAngle + (shown ? 8.0f : 0.0f);
-    }
+    const float hx = z.size[0] / 2, hy = plane ? 0.0f : z.size[1] / 2, hz = z.size[2] / 2;
+    constexpr int n = 5;
+    bool visible = false;
+    // La tete est-elle dans la zone ? Alors elle l'entoure et reste affichee.
+    const V3 lh = ovm::qrot(ovm::qconj(yaw), head - c);
+    if (std::fabs(lh.x) <= hx && std::fabs(lh.y) <= hy + 0.05f && std::fabs(lh.z) <= hz) visible = true;
+    for (int i = 0; i < n && !visible; i++)
+        for (int j = 0; j < (plane ? 1 : n) && !visible; j++)
+            for (int k = 0; k < n && !visible; k++) {
+                const V3 p = {(i / float(n - 1) * 2 - 1) * hx, plane ? 0.0f : (j / float(n - 1) * 2 - 1) * hy,
+                              (k / float(n - 1) * 2 - 1) * hz};
+                const V3 v = ovm::qrot(inv, c + ovm::qrot(yaw, p) - head);  // repere de la tete : l'avant est -Z
+                if (v.z >= -0.01f) continue;                                // derriere
+                const float az = std::atan2(v.x, -v.z) * 180.0f / ovm::kPi;
+                const float el = std::atan2(v.y, std::sqrt(v.x * v.x + v.z * v.z)) * 180.0f / ovm::kPi;
+                if (std::fabs(az) < maxH && std::fabs(el) < maxV) visible = true;
+            }
     g.gazeShown[z.name] = visible;
     return visible;
 }
@@ -426,9 +437,11 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
                     (loc.locationFlags & need) == need;
     V3 head = {loc.pose.position.x, loc.pose.position.y, loc.pose.position.z};
     float pitchDown = 0;
+    Q headQ;
     V3 fwd = {0, 0, -1};
     if (haveHead) {
         Q q = {loc.pose.orientation.x, loc.pose.orientation.y, loc.pose.orientation.z, loc.pose.orientation.w};
+        headQ = q;
         fwd = ovm::qrot(q, V3{0, 0, -1});
         float fy = fwd.y;
         pitchDown = std::asin(std::clamp(-fy, -1.0f, 1.0f)) * 180.0f / ovm::kPi;
@@ -439,10 +452,18 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     for (const ovz::Zone& z : g.zones) {
         if (!z.enabled) continue;
         if (z.look > 0 && haveHead && pitchDown < z.look) continue;
-        if (g.cfg.gazeOnly && haveHead && !inGaze(z, head, fwd)) continue;
+        if (g.cfg.gazeOnly && haveHead && !inGaze(z, head, headQ)) continue;
         addZoneQuads(z, haveHead, head, quads);
     }
     if (quads.empty()) return nx.EndFrame(session, info);
+
+    // Chaque face est superposee plusieurs fois : un pixel de bord couvert a moitie passe a 75 %, 87 %... de magenta,
+    // et Virtual Desktop l'efface avec le reste au lieu de laisser un liseré rose. Au plus ~80 couches au total.
+    const size_t base = quads.size();
+    const size_t passes = std::clamp<size_t>(80 / base, 1, static_cast<size_t>(g.cfg.edgePasses));
+    quads.reserve(base * passes);
+    for (size_t p = 1; p < passes; p++)
+        for (size_t i = 0; i < base; i++) quads.push_back(quads[i]);
 
     std::vector<const XrCompositionLayerBaseHeader*> layers(info->layers, info->layers + info->layerCount);
     for (auto& q : quads) layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q));
