@@ -39,7 +39,10 @@ target_link_libraries(overlayvr_editor PRIVATE OpenXR::headers OpenXR::openxr_lo
 add_custom_command(TARGET overlayvr_layer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_SOURCE_DIR}/install/install_layer.bat
-          ${CMAKE_SOURCE_DIR}/install/uninstall_layer.bat
-          ${CMAKE_SOURCE_DIR}/install/desactiver_couche.bat
-          ${CMAKE_SOURCE_DIR}/install/reactiver_couche.bat
-          ${CMAKE_SOURCE_DIR}/install/basculer_zones.ps1 $<TARGET_FILE_DIR:overlayvr_layer>)
+          ${CMAKE_SOURCE_DIR}/install/uninstall_layer.bat $<TARGET_FILE_DIR:overlayvr_layer>)
+
+# Application de la barre d'etat : zones ON/OFF, couche OpenXR, lancement de l'editeur.
+add_executable(overlayvr_tray WIN32 tray/tray.cpp)
+set_target_properties(overlayvr_tray PROPERTIES OUTPUT_NAME OverlayVR_Tray)
+target_compile_definitions(overlayvr_tray PRIVATE UNICODE _UNICODE)
+target_link_libraries(overlayvr_tray PRIVATE OpenXR::headers nlohmann_json::nlohmann_json shell32 advapi32 user32 gdi32)

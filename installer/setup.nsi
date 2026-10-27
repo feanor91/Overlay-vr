@@ -16,22 +16,28 @@ Unicode true
 !define LAYER_KEY "SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit"
 !define LAYER_JSON "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.json"
 
+Function LaunchTray
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\OverlayVR_Tray.exe"'
+FunctionEnd
+!define MUI_FINISHPAGE_RUN ""
+!define MUI_FINISHPAGE_RUN_TEXT "Lancer OverlayVR (icone dans la barre d'etat)"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchTray
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "French"
 
 Section "Install"
   SetRegView 64
+  nsExec::Exec 'taskkill /F /IM OverlayVR_Tray.exe'
   SetOutPath "$INSTDIR"
   File "..\dist\XR_APILAYER_OVERLAYVR_zones.dll"
   File "..\dist\XR_APILAYER_OVERLAYVR_zones.json"
   File "..\dist\OverlayVR_Editor.exe"
   File "..\dist\README.md"
-  File "..\dist\desactiver_couche.bat"
-  File "..\dist\reactiver_couche.bat"
-  File "..\dist\basculer_zones.ps1"
+  File "..\dist\OverlayVR_Tray.exe"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   ; Couche API OpenXR implicite : valeur 0 = activee.
@@ -48,12 +54,7 @@ Section "Install"
   settings_done:
 
   CreateDirectory "$SMPROGRAMS\OverlayVR"
-  CreateShortcut "$SMPROGRAMS\OverlayVR\Reglages (jeux concernes).lnk" "notepad.exe" '"$APPDATA\OverlayVR\settings.json"'
-  CreateShortcut "$SMPROGRAMS\OverlayVR\Zones ON-OFF (instantane).lnk" "powershell.exe" '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\basculer_zones.ps1"'
-  CreateShortcut "$SMPROGRAMS\OverlayVR\Desactiver la couche OpenXR.lnk" "$INSTDIR\desactiver_couche.bat"
-  CreateShortcut "$SMPROGRAMS\OverlayVR\Reactiver la couche OpenXR.lnk" "$INSTDIR\reactiver_couche.bat"
-  CreateShortcut "$SMPROGRAMS\OverlayVR\Dossier des donnees.lnk" "explorer.exe" '"$APPDATA\OverlayVR"'
-  CreateShortcut "$SMPROGRAMS\OverlayVR\Journal de la couche.lnk" "notepad.exe" '"$APPDATA\OverlayVR\layer.log"'
+  CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR (barre d'etat).lnk" "$INSTDIR\OverlayVR_Tray.exe"
   CreateShortcut "$SMPROGRAMS\OverlayVR\OverlayVR Editeur.lnk" "$INSTDIR\OverlayVR_Editor.exe"
   CreateShortcut "$SMPROGRAMS\OverlayVR\Desinstaller OverlayVR.lnk" "$INSTDIR\Uninstall.exe"
 
@@ -65,6 +66,8 @@ SectionEnd
 
 Section "Uninstall"
   SetRegView 64
+  nsExec::Exec 'taskkill /F /IM OverlayVR_Tray.exe'
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "OverlayVR"
   DeleteRegValue HKLM "${LAYER_KEY}" "${LAYER_JSON}"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OverlayVR"
   DeleteRegKey HKLM "Software\OverlayVR"
@@ -74,9 +77,7 @@ Section "Uninstall"
   Delete "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.json"
   Delete "$INSTDIR\OverlayVR_Editor.exe"
   Delete "$INSTDIR\README.md"
-  Delete "$INSTDIR\desactiver_couche.bat"
-  Delete "$INSTDIR\reactiver_couche.bat"
-  Delete "$INSTDIR\basculer_zones.ps1"
+  Delete "$INSTDIR\OverlayVR_Tray.exe"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
 SectionEnd

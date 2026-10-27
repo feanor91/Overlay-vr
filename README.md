@@ -94,17 +94,20 @@ Si un léger liseré rose subsiste, augmente aussi la tolérance de la couleur d
 Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Journal de la couche ») : la ligne
 `couche chargée dans XXX.exe` donne le nom exact à copier dans `apps` (le nom de l'application OpenXR marche aussi).
 
-## Désactiver la couche
+## Application de la barre d'état
 
-Trois niveaux, du plus léger au plus complet (raccourcis dans le menu Démarrer, dossier OverlayVR) :
+Après l'installation, **OverlayVR** tourne dans la zone de notification de Windows (à côté de l'horloge ; au besoin, flèche « ^ »
+pour la voir). La pastille donne l'état : **verte** = zones actives, **grise** = zones coupées, **rouge** = couche OpenXR désactivée.
 
-| Besoin | Comment | Effet |
-|---|---|---|
-| Couper les zones tout de suite, même en jeu | Raccourci **Zones ON-OFF (instantané)** (ou `"enabled": false` dans `settings.json`) | Immédiat, sans droits administrateur. La couche reste chargée mais ne dessine plus rien |
-| Ne plus charger la couche du tout | Raccourci **Désactiver la couche OpenXR** (administrateur) | Aucun jeu ne la charge, **au prochain lancement du jeu**. **Réactiver la couche OpenXR** pour revenir |
-| Désinstaller | « Désinstaller OverlayVR » (menu Démarrer) | Retire tout |
+| Action | Comment |
+|---|---|
+| Activer / désactiver les zones, tout de suite, même en jeu | **Clic gauche** sur l'icône (sans droits administrateur) |
+| Lancer le gestionnaire de zones | Clic droit, **Lancer le gestionnaire de zones** (à faire jeu fermé, depuis le casque) |
+| Charger / ne plus charger la couche OpenXR dans les jeux | Clic droit, **Couche OpenXR chargée par les jeux** (demande l'administrateur ; effet au prochain lancement du jeu) |
+| Réglages, dossier des données | Clic droit, **Réglages** / **Ouvrir le dossier des données** |
+| Démarrer avec Windows | Clic droit, **Lancer au démarrage de Windows** |
 
-Pour savoir si la couche pèse sur tes FPS, désactive-la (niveau 2) et compare.
+Pour savoir si la couche pèse sur tes FPS, désactive-la (case décochée), relance le jeu et compare.
 
 ## Limites et points à valider casque sur la tête
 
