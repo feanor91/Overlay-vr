@@ -283,7 +283,38 @@ inline Mat4 boxWorld(V3 center, float yaw, V3 size) {
 }
 
 // Zone en fil de fer : aretes epaisses et opaques (visibles de loin, et le bureau reste visible au travers).
+// Barre fine entre deux points a peu pres a la meme hauteur (contour d'une forme en cours de trace).
+inline void drawSegment(Renderer& r, V3 a, V3 b, const float rgba[4], float thick) {
+    V3 d = b - a;
+    d.y = 0;
+    const float len = ovm::length(d);
+    if (len < 1e-4f) return;
+    const V3 mid = (a + b) * 0.5f;
+    r.box(ovm::mmul(ovm::mFromPose(mid, ovm::qaxis('y', std::atan2(-d.z, d.x))), ovm::mScale({len + thick, thick, thick})), rgba);
+}
+
 inline void drawZone(Renderer& r, const ovz::Zone& z, const float edgeRgba[4], float edge) {
+    if (z.type == ovz::ZoneType::Poly) {  // contour du haut et du bas + aretes verticales aux sommets
+        const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
+        const Mat4 frame = ovm::mFromPose(c, ovm::qaxis('y', z.yaw));
+        const float hh = z.size[1] / 2;
+        const size_t n = z.pts.size();
+        for (size_t i = 0; i < n; i++) {
+            const auto &a = z.pts[i], &b = z.pts[(i + 1) % n];
+            const V3 dd = {b[0] - a[0], 0, b[1] - a[1]};
+            const float len = ovm::length(dd);
+            for (float y : {hh, -hh}) {
+                if (len > 1e-4f && (y > 0 || hh > 0.002f))
+                    r.box(ovm::mmul(frame, ovm::mmul(ovm::mFromPose({(a[0] + b[0]) / 2, y, (a[1] + b[1]) / 2},
+                                                                      ovm::qaxis('y', std::atan2(-dd.z, dd.x))),
+                                                     ovm::mScale({len + edge, edge, edge}))),
+                          edgeRgba);
+            }
+            if (hh > 0.002f)
+                r.box(ovm::mmul(frame, ovm::mmul(ovm::mTranslate({a[0], 0, a[1]}), ovm::mScale({edge, z.size[1] + edge, edge}))), edgeRgba);
+        }
+        return;
+    }
     const bool plane = z.type == ovz::ZoneType::Plane;
     const V3 size = {z.size[0], plane ? 0.0f : z.size[1], z.size[2]};
     const V3 c = {z.pos[0], z.pos[1], z.pos[2]};

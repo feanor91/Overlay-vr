@@ -337,7 +337,7 @@ void refreshZones() {
     ListView_DeleteAllItems(lv);
     for (size_t i = 0; i < g_zones.size(); i++) {
         const ovz::Zone& z = g_zones[i];
-        std::wstring name = W(z.name), type = z.type == ovz::ZoneType::Plane ? L"plan" : L"volume",
+        std::wstring name = W(z.name), type = z.type == ovz::ZoneType::Plane ? L"plan" : z.type == ovz::ZoneType::Poly ? L"forme" : L"volume",
                      game = z.profile.empty() ? L"Tous les jeux" : W(z.profile);
         LVITEMW item = {};
         item.mask = LVIF_TEXT;

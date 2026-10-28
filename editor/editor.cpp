@@ -142,11 +142,12 @@ private:
     ZoneType mode_ = ZoneType::Box;
 
     // Tracé en 3 temps : 1er bord (A -> B, donne l'orientation), puis largeur du cote oppose, puis hauteur (volume).
-    enum class Phase { Idle, Edge, Depth, Top, Bottom };
+    enum class Phase { Idle, Edge, Depth, Points, Top, Bottom };
     Phase phase_ = Phase::Idle;
     V3 anchor_, corner_;
     float drawYaw_ = 0, dz_ = 0.02f, heightAdj_ = 0, topY_ = 0, bottomRefY_ = 0;
     bool bottomActive_ = false;
+    std::vector<V3> polyPts_;  // sommets de la forme libre en cours de trace (sur le plan de visee)
     Zone preview_;
     float surfaceY_ = 0.75f;  // hauteur du plan de visee (bureau), reglable au clic du stick droit
     V3 hit_;                  // point vise sur ce plan (main droite)
@@ -190,6 +191,7 @@ private:
         V3 pos;
         float yaw;
         float size[3];
+        std::vector<std::array<float, 2>> pts;
     };
     struct Grab {
         bool active = false;
@@ -420,7 +422,7 @@ private:
                     bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
                     CHK(xrBeginSession(session_, &bi));
                     running_ = true;
-                    std::printf("Session demarree. Mode : %s\n", mode_ == ZoneType::Box ? "VOLUME" : "PLAN");
+                    std::printf("Session demarree. Mode : VOLUME\n");
                 } else if (s->state == XR_SESSION_STATE_STOPPING) {
                     xrEndSession(session_);
                     running_ = false;
@@ -621,7 +623,7 @@ private:
             const bool take = zoneIndex < 0 ? !otherProfile(zones_[i]) : static_cast<int>(i) == zoneIndex;
             if (!take) continue;
             const Zone& z = zones_[i];
-            grab_.items.push_back({i, {z.pos[0], z.pos[1], z.pos[2]}, z.yaw, {z.size[0], z.size[1], z.size[2]}});
+            grab_.items.push_back({i, {z.pos[0], z.pos[1], z.pos[2]}, z.yaw, {z.size[0], z.size[1], z.size[2]}, z.pts});
         }
         std::printf("Saisie : %zu zone(s)\n", grab_.items.size());
     }
@@ -680,6 +682,10 @@ private:
             if (grab_.hand == 1)
                 for (int k = 0; k < 3; k++)
                     z.size[k] = z.type == ZoneType::Plane && k == 1 ? 0.0f : std::clamp(s.size[k] * grab_.scale * (k == 1 ? grab_.heightScale : 1.0f), 0.03f, 6.0f);
+            if (grab_.hand == 1 && z.type == ZoneType::Poly) {  // les sommets suivent la boite englobante
+                const float kx = z.size[0] / std::max(s.size[0], 1e-4f), kz = z.size[2] / std::max(s.size[2], 1e-4f);
+                for (size_t i = 0; i < z.pts.size() && i < s.pts.size(); i++) z.pts[i] = {s.pts[i][0] * kx, s.pts[i][1] * kz};
+            }
         }
     }
 
@@ -707,11 +713,44 @@ private:
         preview_.pos[2] = c.z;
     }
 
-    void cancelDrawing() { phase_ = Phase::Idle; }
+    // Forme libre : les sommets (monde) deviennent des points relatifs au centre de leur boite englobante.
+    void buildPolyPreview(float y0, float y1) {
+        float minx = 1e9f, maxx = -1e9f, minz = 1e9f, maxz = -1e9f;
+        for (const V3& p : polyPts_) {
+            minx = std::min(minx, p.x);
+            maxx = std::max(maxx, p.x);
+            minz = std::min(minz, p.z);
+            maxz = std::max(maxz, p.z);
+        }
+        const float cx = (minx + maxx) / 2, cz = (minz + maxz) / 2;
+        float lo = std::min(y0, y1), hi = std::max(y0, y1);
+        if (hi - lo < 0.03f) hi = lo + 0.03f;
+        preview_ = Zone{};
+        preview_.type = ZoneType::Poly;
+        preview_.yaw = 0;
+        preview_.pos[0] = cx;
+        preview_.pos[1] = (lo + hi) / 2;
+        preview_.pos[2] = cz;
+        preview_.size[0] = maxx - minx;
+        preview_.size[1] = hi - lo;
+        preview_.size[2] = maxz - minz;
+        for (const V3& p : polyPts_) preview_.pts.push_back({p.x - cx, p.z - cz});
+    }
+
+    // Apercu avec les hauteurs du haut et du bas : forme libre ou rectangle selon le mode.
+    void previewHeights(float y0, float y1) {
+        if (mode_ == ZoneType::Poly) buildPolyPreview(y0, y1);
+        else buildPreview(dz_, y0, y1);
+    }
+
+    void cancelDrawing() {
+        phase_ = Phase::Idle;
+        polyPts_.clear();
+    }
 
     void commitPreview() {
         pushHistory();
-        preview_.name = (mode_ == ZoneType::Plane ? "plan" : "volume") + std::to_string(counter_++);
+        preview_.name = (mode_ == ZoneType::Plane ? "plan" : mode_ == ZoneType::Poly ? "forme" : "volume") + std::to_string(counter_++);
         preview_.profile = activeProfile();
         zones_.push_back(preview_);
         save();
@@ -801,10 +840,31 @@ private:
         switch (phase_) {
             case Phase::Idle:
                 if (in_.trigR.down() && hasHit_ && !grab_.active) {
-                    phase_ = Phase::Edge;
-                    anchor_ = corner_ = hit_;
+                    if (mode_ == ZoneType::Poly) {  // forme libre : un clic par sommet
+                        phase_ = Phase::Points;
+                        polyPts_.assign(1, hit_);
+                    } else {
+                        phase_ = Phase::Edge;
+                        anchor_ = corner_ = hit_;
+                    }
                 }
                 break;
+            case Phase::Points: {  // gachette = ajouter un sommet ; clic pres du 1er (ou A) = fermer ; B = retirer le dernier
+                if (in_.b.down()) {
+                    polyPts_.pop_back();
+                    if (polyPts_.empty()) cancelDrawing();
+                    break;
+                }
+                auto dist2 = [](V3 a, V3 b) { return std::hypot(a.x - b.x, a.z - b.z); };
+                const bool nearFirst = hasHit_ && polyPts_.size() >= 3 && dist2(hit_, polyPts_[0]) < 0.08f;
+                if ((in_.a.down() && polyPts_.size() >= 3) || (in_.trigR.down() && nearFirst)) {
+                    phase_ = Phase::Top;
+                    heightAdj_ = 0;
+                } else if (in_.trigR.down() && hasHit_ && dist2(hit_, polyPts_.back()) > 0.03f) {
+                    polyPts_.push_back(hit_);
+                }
+                break;
+            }
             case Phase::Edge:  // gachette maintenue : on tire le 1er bord
                 if (hasHit_) corner_ = hit_;
                 buildPreview(0.02f, surfaceY_, surfaceY_ + 0.02f);
@@ -842,7 +902,7 @@ private:
                 stickState(1, sx, sy);
                 if (std::fabs(sy) > 0.15f) heightAdj_ += sy * 0.3f * lastDt_;
                 const float top = rh.pos.y + heightAdj_;
-                buildPreview(dz_, surfaceY_, top);
+                previewHeights(surfaceY_, top);
                 if (in_.b.down()) {
                     cancelDrawing();
                 } else if (in_.trigR.down()) {
@@ -860,7 +920,7 @@ private:
                 if (std::fabs(sy) > 0.15f) heightAdj_ += sy * 0.3f * lastDt_;
                 if (!bottomActive_ && std::fabs(rh.pos.y - bottomRefY_) > 0.04f) bottomActive_ = true;
                 const float bottom = (bottomActive_ ? rh.pos.y : surfaceY_) + heightAdj_;
-                buildPreview(dz_, bottom, topY_);
+                previewHeights(bottom, topY_);
                 if (in_.b.down()) cancelDrawing();
                 else if (in_.trigR.down()) commitPreview();
                 break;
@@ -921,8 +981,8 @@ private:
 
         if (phase_ == Phase::Idle && !grab_.active) {
             if (in_.a.down()) {
-                mode_ = mode_ == ZoneType::Box ? ZoneType::Plane : ZoneType::Box;
-                std::printf("Mode : %s\n", mode_ == ZoneType::Box ? "VOLUME" : "PLAN");
+                mode_ = mode_ == ZoneType::Box ? ZoneType::Plane : mode_ == ZoneType::Plane ? ZoneType::Poly : ZoneType::Box;
+                std::printf("Mode : %s\n", mode_ == ZoneType::Box ? "VOLUME" : mode_ == ZoneType::Plane ? "PLAN" : "FORME LIBRE");
             }
             if (in_.b.down() && hover_[1] >= 0) {  // supprimer la zone visee
                 pushHistory();
@@ -987,8 +1047,11 @@ private:
                 break;
             case Phase::Edge: hint = std::wstring(L"1/") + (plane ? L"2" : L"4") + L" Tire le 1er bord jusqu'à l'autre coin, puis relâche (B annule)"; break;
             case Phase::Depth: hint = std::wstring(L"2/") + (plane ? L"2" : L"4") + L" Vise le côté opposé, gâchette pour valider (B annule)"; break;
-            case Phase::Top: hint = L"3/4 Place la manette au SOMMET de l'objet, gâchette pour valider (B annule)"; break;
-            case Phase::Bottom: hint = L"4/4 Descends la manette au BAS de l'objet (ou valide : bas = plan de visée), gâchette"; break;
+            case Phase::Points:
+                hint = L"Forme libre : gâchette à chaque sommet ; clic sur le 1er point (ou A) ferme ; B retire le dernier";
+                break;
+            case Phase::Top: hint = std::wstring(mode_ == ZoneType::Poly ? L"2/3" : L"3/4") + L" Place la manette au SOMMET de l'objet, gâchette pour valider (B annule)"; break;
+            case Phase::Bottom: hint = std::wstring(mode_ == ZoneType::Poly ? L"3/3" : L"4/4") + L" Descends la manette au BAS de l'objet (ou valide : bas = plan de visée), gâchette"; break;
         }
         if (xHold_ > 0.6f && in_.x.now && !xCleared_) hint = L"!Maintiens X… tout va être effacé";
         if (namingIdx_ >= 0) {
@@ -998,7 +1061,7 @@ private:
         }
         char buf[64];
         std::snprintf(buf, sizeof buf, "%d zone(s)   |   bureau à %.2f m", static_cast<int>(zones_.size()), surfaceY_);
-        status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : L"VOLUME") + L"   |   Jeu actif : " +
+        status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : mode_ == ZoneType::Poly ? L"FORME LIBRE" : L"VOLUME") + L"   |   Jeu actif : " +
                               (curProfile_ == 0 ? std::wstring(L"tous les jeux") : widen(activeProfile())),
                           widen(buf),
                           hint,
@@ -1006,11 +1069,12 @@ private:
         if (!showHelp_) return;
         help_.setLines({
             L"#MAIN DROITE",
-            L"Gâchette : tracer (1er bord, largeur, puis haut et bas de la boîte)",
+            L"Gâchette : tracer (1er bord, largeur, puis haut et bas)",
             L"Grip tenu sur une zone visée : la déplacer ; tourne le poignet",
             L"     pour l'orienter ; stick ◄► tourne, ▲▼ taille ; stick gauche ▲▼ hauteur",
             L"B sur une zone visée : la supprimer",
-            L"A : volume / plan        Stick ▲▼ : monter/descendre le plan de visée",
+            L"A : volume / plan / forme libre        Stick ▲▼ : monter/descendre le plan de visée",
+            L"Forme libre : gâchette à chaque sommet, A ou clic sur le 1er point ferme, B retire",
             L"Clic stick : plan de visée = hauteur de la manette (posée sur le bureau)",
             L"#MAIN GAUCHE",
             L"X : annuler (maintenu 2 s : tout effacer)",
@@ -1026,6 +1090,7 @@ private:
 
     // --- rendu -------------------------------------------------------------------------------------------
     void drawScene() {
+        const float orange[4] = {1.0f, 0.55f, 0.1f, 1};
         const float cyan[4] = {0.1f, 0.85f, 1, 1}, yellow[4] = {1, 0.9f, 0.0f, 1}, white[4] = {1, 1, 1, 1}, green[4] = {0.2f, 1, 0.2f, 1};
         for (size_t i = 0; i < zones_.size(); i++) {
             const Zone& z = zones_[i];
@@ -1033,20 +1098,27 @@ private:
             const bool hovered = static_cast<int>(i) == hover_[0] || static_cast<int>(i) == hover_[1];
             if (otherProfile(z)) {
                 const float grey[4] = {0.38f, 0.38f, 0.42f, 1};
-                drawZone(rend_, z, grey, 0.008f);
+                drawZone(rend_, z, grey, 0.003f);
                 continue;
             }
-            const float* col = isGrabbed(i) ? green : hovered ? white : plane ? yellow : cyan;
-            drawZone(rend_, z, col, hovered || isGrabbed(i) ? 0.025f : 0.012f);
+            const float* col = isGrabbed(i) ? green : hovered ? white : plane ? yellow : z.type == ZoneType::Poly ? orange : cyan;
+            drawZone(rend_, z, col, hovered || isGrabbed(i) ? 0.008f : 0.004f);  // traits fins
             if (z.look > 0) {  // repere blanc au-dessus : affichage conditionnel actif
                 rend_.box(boxWorld({z.pos[0], z.pos[1] + (plane ? 0.06f : z.size[1] / 2 + 0.06f), z.pos[2]}, 0, {0.05f, 0.05f, 0.05f}), white);
             }
         }
-        if (phase_ != Phase::Idle) drawZone(rend_, preview_, green, 0.025f);
+        if (phase_ == Phase::Points) {  // contour en cours : segments, sommets et trait vers le point vise
+            for (size_t i = 0; i + 1 < polyPts_.size(); i++) drawSegment(rend_, polyPts_[i], polyPts_[i + 1], green, 0.006f);
+            if (hasHit_) drawSegment(rend_, polyPts_.back(), hit_, white, 0.004f);
+            const bool closable = hasHit_ && polyPts_.size() >= 3 && std::hypot(hit_.x - polyPts_[0].x, hit_.z - polyPts_[0].z) < 0.08f;
+            for (size_t i = 0; i < polyPts_.size(); i++)
+                rend_.box(boxWorld(polyPts_[i], 0, i == 0 ? V3{0.03f, 0.03f, 0.03f} : V3{0.015f, 0.015f, 0.015f}), i == 0 && closable ? white : green);
+        } else if (phase_ != Phase::Idle) {
+            drawZone(rend_, preview_, green, 0.008f);
+        }
 
         // Lasers et curseurs.
-        const bool boxMode = mode_ == ZoneType::Box;
-        const float rightCol[4] = {boxMode ? 0.1f : 1.0f, 0.9f, boxMode ? 1.0f : 0.0f, 1};
+        const float* rightCol = mode_ == ZoneType::Box ? cyan : mode_ == ZoneType::Plane ? yellow : orange;
         for (int i = 0; i < 2; i++) {
             if (!rayValid_[i]) continue;
             float len = 2.5f;
@@ -1055,12 +1127,12 @@ private:
             const float leftCol[4] = {0.85f, 0.85f, 0.85f, 1};
             const float* col = i == 1 ? rightCol : leftCol;
             rend_.box(ovm::mmul(ovm::mFromPose(rayOrigin_[i] + rayDir_[i] * (len / 2), hands_[i].aimRot),
-                                ovm::mScale({0.008f, 0.008f, len})), col);
-            rend_.box(boxWorld(rayOrigin_[i] + rayDir_[i] * len, 0, {0.04f, 0.04f, 0.04f}), white);
+                                ovm::mScale({0.004f, 0.004f, len})), col);
+            rend_.box(boxWorld(rayOrigin_[i] + rayDir_[i] * len, 0, {0.02f, 0.02f, 0.02f}), white);
         }
         if (hasHit_ && hover_[1] < 0) {  // croix sur le plan de visee
-            rend_.box(boxWorld(hit_, 0, {0.12f, 0.008f, 0.008f}), white);
-            rend_.box(boxWorld(hit_, 0, {0.008f, 0.008f, 0.12f}), white);
+            rend_.box(boxWorld(hit_, 0, {0.10f, 0.004f, 0.004f}), white);
+            rend_.box(boxWorld(hit_, 0, {0.004f, 0.004f, 0.10f}), white);
         }
 
         // Panneaux de texte fixes dans la piece (ils ne suivent pas la tete), l'etat au-dessus de l'aide.

@@ -2,7 +2,7 @@
 //   Clic gauche  : active / desactive les zones, tout de suite (meme jeu lance), sans droits administrateur.
 //   Clic droit   : menu - lancer le gestionnaire de zones, charger / decharger la couche OpenXR (administrateur),
 //                  reglages, dossier des donnees, demarrage avec Windows.
-// Pastille : verte = zones actives, grise = zones coupees, rouge = couche OpenXR desactivee.
+// Icone en forme d'oeil : iris vert = zones actives, gris et barre = zones coupees, rouge et barre = couche OpenXR desactivee.
 #define NOMINMAX
 #ifndef UNICODE
 #define UNICODE
@@ -105,8 +105,38 @@ IconState currentState() {
 }
 
 // --- icone ---------------------------------------------------------------------------------------------
-HICON makeIcon(uint8_t r, uint8_t g, uint8_t b) {
-    constexpr int S = 32;
+// Couleur d'un point de l'icone en forme d'oeil (u, v dans [-1, 1], v vers le haut). Renvoie faux hors de l'icone.
+bool eyePixel(float u, float v, uint8_t ir, uint8_t ig, uint8_t ib, bool slashed, float rgb[3]) {
+    auto set = [&](float r, float g, float b) {
+        rgb[0] = r;
+        rgb[1] = g;
+        rgb[2] = b;
+    };
+    bool hit = false;
+    const float lens = std::fabs(u) <= 1.0f ? 0.58f * (1.0f - u * u) : -1.0f;  // demi-hauteur de la paupiere en u
+    const float inside = lens - std::fabs(v);                                  // > 0 : dans l'oeil
+    if (inside >= 0) {
+        hit = true;
+        if (inside < 0.10f) set(25, 25, 35);                                   // contour
+        else if (u * u + v * v < 0.17f * 0.17f) set(15, 15, 20);               // pupille
+        else if ((u + 0.12f) * (u + 0.12f) + (v - 0.14f) * (v - 0.14f) < 0.07f * 0.07f) set(255, 255, 255);  // reflet
+        else if (u * u + v * v < 0.40f * 0.40f) set(ir, ig, ib);               // iris, couleur = etat
+        else set(246, 246, 246);                                               // blanc de l'oeil
+    }
+    if (slashed) {  // oeil barre : zones ou couche coupees
+        const float dist = std::fabs(0.8f * u + v) / std::sqrt(0.8f * 0.8f + 1.0f);  // distance a la droite v = -0.8 u
+        if (std::fabs(u) < 0.95f && dist < 0.15f) {
+            hit = true;
+            if (dist < 0.075f) set(205, 35, 35);
+            else set(255, 255, 255);  // liseré blanc autour du trait
+        }
+    }
+    return hit;
+}
+
+// Icone en forme d'oeil : l'iris prend la couleur de l'etat, un trait barre l'oeil quand c'est coupe.
+HICON makeIcon(uint8_t r, uint8_t g, uint8_t b, bool slashed) {
+    constexpr int S = 32, SS = 4;  // 4x4 sous-echantillons par pixel : bords lisses
     HDC dc = GetDC(nullptr);
     BITMAPINFO bi = {};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -120,19 +150,24 @@ HICON makeIcon(uint8_t r, uint8_t g, uint8_t b) {
     HBITMAP mask = CreateBitmap(S, S, 1, 1, nullptr);
     for (int y = 0; y < S; y++)
         for (int x = 0; x < S; x++) {
-            const float dx = x + 0.5f - S / 2.0f, dy = y + 0.5f - S / 2.0f;
-            const float d = std::sqrt(dx * dx + dy * dy);
-            uint32_t argb = 0;
-            if (d <= 14.5f) {
-                // anneau blanc, disque colore, bord adouci
-                const bool ring = d > 11.5f;
-                const uint8_t cr = ring ? 255 : r, cg = ring ? 255 : g, cb = ring ? 255 : b;
-                const float a = std::min(1.0f, 14.5f - d + 0.5f);
-                const uint8_t A = static_cast<uint8_t>(a * 255);
-                argb = (static_cast<uint32_t>(A) << 24) | (static_cast<uint32_t>(cr * a) << 16) |
-                       (static_cast<uint32_t>(cg * a) << 8) | static_cast<uint32_t>(cb * a);  // alpha premultiplie
-            }
-            px[y * S + x] = argb;
+            float acc[3] = {0, 0, 0}, cover = 0;
+            for (int sy = 0; sy < SS; sy++)
+                for (int sx = 0; sx < SS; sx++) {
+                    const float u = ((x + (sx + 0.5f) / SS) - S / 2.0f) / 15.5f;
+                    const float v = -((y + (sy + 0.5f) / SS) - S / 2.0f) / 15.5f;
+                    float c3[3];
+                    if (eyePixel(u, v, r, g, b, slashed, c3)) {
+                        acc[0] += c3[0];
+                        acc[1] += c3[1];
+                        acc[2] += c3[2];
+                        cover += 1;
+                    }
+                }
+            const float n = static_cast<float>(SS * SS);
+            const uint32_t A = static_cast<uint32_t>(cover / n * 255);
+            // alpha premultiplie : les couleurs accumulees sont deja ponderees par la couverture
+            px[y * S + x] = (A << 24) | (static_cast<uint32_t>(acc[0] / n) << 16) | (static_cast<uint32_t>(acc[1] / n) << 8) |
+                            static_cast<uint32_t>(acc[2] / n);
         }
     ICONINFO ii = {TRUE, 0, 0, mask, color};
     HICON icon = CreateIconIndirect(&ii);
@@ -271,9 +306,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     g_exeDir = g_exePath.substr(0, g_exePath.find_last_of(L'\\'));
     g_manifest = g_exeDir + L"\\XR_APILAYER_OVERLAYVR_zones.json";
 
-    g_icons[Green] = makeIcon(60, 200, 90);
-    g_icons[Grey] = makeIcon(135, 135, 135);
-    g_icons[Red] = makeIcon(215, 55, 55);
+    g_icons[Green] = makeIcon(60, 200, 90, false);
+    g_icons[Grey] = makeIcon(135, 135, 135, true);
+    g_icons[Red] = makeIcon(215, 55, 55, true);
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     WNDCLASSW wc = {};

@@ -35,7 +35,8 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 | Action | Commande |
 |---|---|
 | Tracer une zone | Gâchette, en plusieurs temps : (1) maintiens la gâchette et tire le **1er bord** de A à B, c'est lui qui donne l'**orientation** ; (2) vise le côté opposé, gâchette pour valider. Un plan s'arrête là. Pour un volume : (3) place la manette au **sommet** de l'objet (la boîte suit ta main), gâchette ; (4) descends-la au **bas** de l'objet, gâchette (ou valide directement : le bas reste alors au plan de visée). Le haut et le bas sont des hauteurs réelles : une boîte peut donc dépasser du bureau **et** descendre dessous. Stick ▲▼ pour affiner, B annule |
-| Volume (cyan) ou plan (jaune) | A |
+| Changer de mode de tracé | **A** : volume (cyan) → plan (jaune) → **forme libre** (orange). Le laser prend la couleur du mode |
+| Tracer une **forme libre** | Mode forme libre : **gâchette à chaque sommet** du contour (sur le plan de visée), puis **clic sur le 1er point** (ou **A**) pour fermer ; **B** retire le dernier sommet. Ensuite, comme un volume : manette au **sommet** puis au **bas**, gâchette à chaque fois. Formes concaves possibles (L, U…) |
 | Déplacer / orienter une zone | Grip tenu sur la zone visée, puis bouge la main et **tourne le poignet** ; stick droit ◄► tourne, ▲▼ agrandit/réduit ; stick gauche ▲▼ change la hauteur seule |
 | Supprimer | B sur la zone visée (ou B pendant qu'on la tient) |
 | Hauteur du plan de visée | Stick ▲▼ (sans grip) pour le monter ou le descendre, ou pose la manette sur une surface et clique le stick ; mémorisée (75 cm par défaut) |
@@ -166,7 +167,7 @@ Dans l'éditeur :
 ## Application de la barre d'état
 
 Après l'installation, **OverlayVR** tourne dans la zone de notification de Windows (à côté de l'horloge ; au besoin, flèche « ^ »
-pour la voir). La pastille donne l'état : **verte** = zones actives, **grise** = zones coupées, **rouge** = couche OpenXR désactivée.
+pour la voir). L'icône est un **œil** qui donne l'état : iris **vert** = zones actives, **gris barré** = zones coupées, **rouge barré** = couche OpenXR désactivée.
 
 | Action | Comment |
 |---|---|
@@ -188,3 +189,9 @@ Ce code n'a **pas encore été testé avec un casque** : il compile, la logique 
 - Les quads du volume sont des faces plates : on ne voit que les faces tournées vers la tête.
 - Un gros nombre de zones ajoute des couches de composition (3 par volume au plus).
 - Ancienne version SteamVR/Python : `legacy/`.
+
+### Formes libres : limites
+
+Dans le jeu, une forme libre est composée de rectangles : un par côté (les murs tournés vers toi) et des bandes de 5 cm au plus pour le dessus ou
+le dessous. Un contour **oblique** est donc légèrement en escalier. Chaque rectangle est une couche de plus pour le casque : garde les formes
+simples (une dizaine de sommets) si tes FPS baissent.

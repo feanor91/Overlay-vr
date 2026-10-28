@@ -346,7 +346,83 @@ XrPosef toXr(V3 p, Q q) {
     return x;
 }
 
+XrCompositionLayerQuad makeQuad(V3 pos, Q q, float w, float h) {
+    XrCompositionLayerQuad quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    quad.layerFlags = 0;
+    quad.space = g.stage;
+    quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    quad.subImage.swapchain = g.swapchain;
+    quad.subImage.imageRect = {{0, 0}, {kSwapchainSize, kSwapchainSize}};
+    quad.subImage.imageArrayIndex = 0;
+    quad.pose = toXr(pos, q);
+    quad.size = {std::max(w, 0.001f), std::max(h, 0.001f)};
+    return quad;
+}
+
+// Forme libre : polygone extrude. Les murs sont un rectangle par arete (ceux qui regardent la tete) ; le dessus ou le
+// dessous (celui qui regarde la tete) est recouvert de bandes rectangulaires qui suivent le contour : une couche de
+// composition ne peut etre qu'un rectangle, donc le bord oblique est un peu en escalier (bandes de 5 cm au plus).
+void addPolyQuads(const ovz::Zone& z, bool haveHead, V3 head, std::vector<XrCompositionLayerQuad>& out) {
+    const float hp = ovm::kPi / 2;
+    const float grow = g.cfg.overlapCm / 100.0f;
+    const Q yaw = ovm::qaxis('y', z.yaw);
+    const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
+    const float h = std::max(z.size[1], 0.03f);
+    const float yTop = c.y + h / 2, yBot = c.y - h / 2;
+    const size_t n = z.pts.size();
+    auto world = [&](float x, float dy, float zz) { return c + ovm::qrot(yaw, V3{x, dy, zz}); };
+
+    for (size_t i = 0; i < n; i++) {  // murs
+        const auto &a = z.pts[i], &b = z.pts[(i + 1) % n];
+        const V3 A = world(a[0], 0, a[1]), B = world(b[0], 0, b[1]);
+        V3 d = B - A;
+        d.y = 0;
+        const float len = ovm::length(d);
+        if (len < 0.01f) continue;
+        const float phi = std::atan2(-d.z, d.x);  // l'axe X du quad suit l'arete
+        const V3 mid = (A + B) * 0.5f;
+        Q q = ovm::qaxis('y', phi);
+        if (haveHead) {
+            if (ovm::dot(ovm::qrot(q, V3{0, 0, 1}), head - mid) < 0) q = ovm::qaxis('y', phi + ovm::kPi);  // face a la tete
+            if (ovm::dot(ovm::qrot(q, V3{0, 0, 1}), head - mid) <= 0) continue;
+        }
+        out.push_back(makeQuad(mid, q, len + grow, h + grow));
+    }
+
+    const int face = !haveHead ? 1 : head.y > yTop ? 1 : head.y < yBot ? -1 : 0;  // dessus, dessous, ou aucun
+    if (face == 0) return;
+    const bool alongX = z.size[0] >= z.size[2];  // bandes allongees dans le sens de la plus grande dimension
+    const float extent = alongX ? z.size[2] : z.size[0];
+    const int strips = std::clamp(static_cast<int>(std::ceil(extent / 0.04f)), 1, 8);
+    const float thick = extent / strips;
+    const Q fq = ovm::qmul(yaw, ovm::qaxis('x', face > 0 ? -hp : hp));
+    for (int k = 0; k < strips; k++) {
+        const float cc = -extent / 2 + (k + 0.5f) * thick;
+        std::vector<float> xs;  // intersections du polygone avec l'axe de la bande
+        for (size_t i = 0; i < n; i++) {
+            const auto &p = z.pts[i], &q = z.pts[(i + 1) % n];
+            const float a0 = alongX ? p[1] : p[0], a1 = alongX ? q[1] : q[0];
+            if ((a0 <= cc) == (a1 <= cc)) continue;
+            const float t = (cc - a0) / (a1 - a0);
+            xs.push_back(alongX ? p[0] + t * (q[0] - p[0]) : p[1] + t * (q[1] - p[1]));
+        }
+        std::sort(xs.begin(), xs.end());
+        for (size_t i = 0; i + 1 < xs.size(); i += 2) {
+            const float lo = xs[i], hi = xs[i + 1];
+            if (hi - lo < 0.005f) continue;
+            const float mid = (lo + hi) / 2;
+            const float dy = face * h / 2;
+            if (alongX) out.push_back(makeQuad(world(mid, dy, cc), fq, hi - lo + grow, thick + grow));
+            else out.push_back(makeQuad(world(cc, dy, mid), fq, thick + grow, hi - lo + grow));
+        }
+    }
+}
+
 void addZoneQuads(const ovz::Zone& z, bool haveHead, V3 head, std::vector<XrCompositionLayerQuad>& out) {
+    if (z.type == ovz::ZoneType::Poly) {
+        addPolyQuads(z, haveHead, head, out);
+        return;
+    }
     const float hp = ovm::kPi / 2;
     const float grow = g.cfg.overlapCm / 100.0f;  // recouvrement : supprime les lignes aux raccords des faces
     const float w = z.size[0], h = z.size[1], d = z.size[2];
@@ -645,6 +721,7 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
         if (!z.enabled) continue;
         if (z.look > 0 && haveHead && pitchDown < z.look) continue;
         if (g.cfg.gazeOnly && haveHead && !inGaze(z, head, fwd)) continue;
+        if (quads.size() > 40) break;  // plafond de couches : chacune pese sur le GPU
         addZoneQuads(z, haveHead, head, quads);
     }
     if (quads.empty()) return nx.EndFrame(session, info);
