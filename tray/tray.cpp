@@ -12,6 +12,7 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 #include <cmath>
@@ -20,17 +21,23 @@
 #include <string>
 
 #include "../common/config.h"
+#include "../common/joypoll.h"
+#include "../common/keys.h"
 
 namespace {
 
 constexpr UINT kTrayMsg = WM_APP + 1;
-constexpr UINT_PTR kTimer = 1;
+constexpr UINT_PTR kTimer = 1, kPollTimer = 2;
 enum : UINT { ID_ZONES = 1, ID_LAYER, ID_EDITOR, ID_SETTINGS, ID_FOLDER, ID_AUTOSTART, ID_QUIT, ID_RAWJSON };
 enum IconState { Green = 0, Grey = 1, Red = 2 };
 
 const wchar_t* const kLayerKey = L"SOFTWARE\\Khronos\\OpenXR\\1\\ApiLayers\\Implicit";
 const wchar_t* const kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 
+ovz::Config g_cfg;            // reglages relus chaque seconde (touche et bouton du gestionnaire de zones)
+ULONGLONG g_cfgLoaded = 0;
+ovz::JoyButton g_joy;
+bool g_editorKeyDown = false;
 HWND g_hwnd = nullptr;
 UINT g_taskbarCreated = 0;
 HICON g_icons[3] = {};
@@ -199,10 +206,52 @@ void updateIcon(bool add) {
 }
 
 // --- actions -------------------------------------------------------------------------------------------
+bool editorRunning() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe = {sizeof pe};
+    bool found = false;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe))
+        found = _wcsicmp(pe.szExeFile, L"OverlayVR_Editor.exe") == 0;
+    CloseHandle(snap);
+    return found;
+}
+
 void launchEditor() {
+    if (editorRunning()) return;  // deja lance : un seul gestionnaire a la fois
     const std::wstring exe = g_exeDir + L"\\OverlayVR_Editor.exe";
     if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, g_exeDir.c_str(), SW_SHOW)) <= 32)
         MessageBoxW(nullptr, L"OverlayVR_Editor.exe est introuvable à côté de cette application.", L"OverlayVR", MB_ICONWARNING);
+}
+
+// Touche clavier et bouton de HOTAS qui lancent le gestionnaire de zones : lus ici (processus normal, sans droits
+// administrateur) car la couche, elle, n'existe que dans un jeu.
+void pollEditorTriggers() {
+    const ULONGLONG now = GetTickCount64();
+    if (now - g_cfgLoaded > 1000) {
+        g_cfgLoaded = now;
+        ovz::Config c;
+        if (ovz::loadConfig(c)) g_cfg = c;
+    }
+    bool trigger = false;
+    const ovz::KeySpec k = ovz::parseKey(g_cfg.editorKey);
+    auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+    const bool pressed = k.vk && down(k.vk) && (!k.ctrl || down(VK_CONTROL)) && (!k.alt || down(VK_MENU)) && (!k.shift || down(VK_SHIFT));
+    if (pressed && !g_editorKeyDown) trigger = true;
+    g_editorKeyDown = pressed;
+    if (g_joy.pressed(g_hwnd, g_cfg.editorJoystickButton, g_cfg.editorJoystick)) trigger = true;
+    if (trigger && !editorRunning()) {
+        MessageBeep(MB_OK);
+        launchEditor();
+    }
+}
+
+std::wstring shortcutLabel() {
+    const ovz::KeySpec k = ovz::parseKey(g_cfg.editorKey);
+    std::string t = k.vk ? ovz::formatKey(k) : "";
+    if (g_cfg.editorJoystickButton > 0) t += (t.empty() ? "" : " / ") + std::string("bouton ") + std::to_string(g_cfg.editorJoystickButton);
+    if (t.empty()) return L"";
+    return L"\t" + std::wstring(t.begin(), t.end());  // ASCII : touches et numero de bouton
 }
 
 void showMenu() {
@@ -213,7 +262,7 @@ void showMenu() {
     AppendMenuW(m, MF_STRING | (layer == 0 ? MF_CHECKED : 0) | (layer < 0 ? MF_GRAYED : 0), ID_LAYER,
                 L"Couche OpenXR chargée par les jeux (administrateur)");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_STRING, ID_EDITOR, L"Lancer le gestionnaire de zones (dans le casque)");
+    AppendMenuW(m, MF_STRING, ID_EDITOR, (std::wstring(L"Lancer le gestionnaire de zones (dans le casque)") + shortcutLabel()).c_str());
     AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Configuration… (bouton de bascule, jeux, regard)");
     AppendMenuW(m, MF_STRING, ID_RAWJSON, L"Modifier settings.json (avancé)");
     AppendMenuW(m, MF_STRING, ID_FOLDER, L"Ouvrir le dossier des données");
@@ -279,8 +328,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             updateIcon(false);
             return 0;
-        case WM_TIMER:  // reglages modifies ailleurs (fichier, autre outil) : on met la pastille a jour
-            if (g_haveIcon && currentState() != g_shown) updateIcon(false);
+        case WM_TIMER:
+            if (wp == kPollTimer) {  // touche / bouton du gestionnaire de zones
+                pollEditorTriggers();
+            } else if (g_haveIcon && currentState() != g_shown) {  // reglages modifies ailleurs : on met la pastille a jour
+                updateIcon(false);
+            }
             return 0;
         case WM_DESTROY: {
             NOTIFYICONDATAW nid = {sizeof nid};
@@ -320,6 +373,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     ovz::ensureConfigFile();
     updateIcon(true);
     SetTimer(g_hwnd, kTimer, 1500, nullptr);
+    SetTimer(g_hwnd, kPollTimer, 40, nullptr);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

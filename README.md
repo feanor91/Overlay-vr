@@ -164,6 +164,30 @@ Dans l'éditeur :
   s'affichent en gris et ne sont pas sélectionnables.
 - **Gâchette gauche** sur une zone visée : la rattache au **jeu actif**.
 
+## Lancer le gestionnaire de zones au clavier ou au HOTAS
+
+Sans toucher à la souris ni à la fenêtre de configuration : l'**application de la barre d'état** (il faut qu'elle tourne, comme d'habitude
+après l'installation) surveille une touche du clavier et un bouton de joystick / HOTAS, et lance le gestionnaire de zones quand tu
+les actionnes. Rien ne demande les droits administrateur.
+
+- **Clavier** : **Ctrl + Alt + E** par défaut.
+- **HOTAS** : aucun bouton par défaut ; renseigne-le dans `settings.json` (clic droit sur l'icône → *Modifier settings.json*) :
+
+```json
+"editor_key": "ctrl+alt+e",
+"editor_joystick": "Throttle",
+"editor_joystick_button": 14
+```
+
+| Réglage | Valeurs |
+|---|---|
+| `editor_key` (défaut `"ctrl+alt+e"`) | Même format que `toggle_key` : `f9`, `ctrl+f9`, `space`… ; `"none"` : pas de touche |
+| `editor_joystick_button` (défaut `0` : aucun) | Numéro du bouton, comme dans `joy.cpl` (même numérotation que `toggle_joystick_button`), de 1 à 128 |
+| `editor_joystick` (défaut `""`) | Morceau du nom du périphérique, sans tenir compte des majuscules ; vide : n'importe quel joystick |
+
+Un seul gestionnaire à la fois : si le gestionnaire tourne déjà, la touche ne fait rien. Un bip signale le lancement. Le gestionnaire
+ne peut pas tourner pendant qu'un jeu utilise le casque : lance-le **jeu fermé**. Le raccourci en cours est rappelé dans le menu de l'icône.
+
 ## Application de la barre d'état
 
 Après l'installation, **OverlayVR** tourne dans la zone de notification de Windows (à côté de l'horloge ; au besoin, flèche « ^ »

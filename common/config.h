@@ -31,6 +31,9 @@ struct Config {
     bool hotkeys = true;          // Ctrl+Alt+fleches... pour recaler les zones en jeu
     std::string toggleKey = "space";      // touche clavier qui active / desactive les zones ("none" : aucune), ex. "ctrl+f9"
     std::string toggleJoystick;           // morceau du nom du joystick / HOTAS ("" : n'importe lequel)
+    std::string editorKey = "ctrl+alt+e";  // touche qui lance le gestionnaire de zones (application de la barre d'etat) ; "none" : aucune
+    std::string editorJoystick;           // morceau du nom du joystick / HOTAS pour lancer le gestionnaire ("" : n'importe lequel)
+    int editorJoystickButton = 0;         // numero du bouton (comme dans joy.cpl, a partir de 1) ; 0 : aucun
     int toggleJoystickButton = 0;         // numero du bouton (comme dans joy.cpl, a partir de 1) ; 0 : aucun
     int edgePasses = 1;        // superpositions de chaque face (1 a 6). Plus de passes = bords plus propres mais plus de couches a composer (FPS)
     float overlapCm = 3.0f;    // les faces d'un volume se recouvrent de ce qu'il faut pour cacher les raccords
@@ -57,6 +60,9 @@ inline bool loadConfig(Config& out) {
         c.toggleKey = j.value("toggle_key", c.toggleKey);
         c.toggleJoystick = j.value("toggle_joystick", c.toggleJoystick);
         c.toggleJoystickButton = j.value("toggle_joystick_button", c.toggleJoystickButton);
+        c.editorKey = j.value("editor_key", c.editorKey);
+        c.editorJoystick = j.value("editor_joystick", c.editorJoystick);
+        c.editorJoystickButton = j.value("editor_joystick_button", c.editorJoystickButton);
         c.edgePasses = std::clamp(j.value("edge_passes", c.edgePasses), 1, 6);
         if (j.contains("profiles")) {
             c.profiles.clear();
@@ -105,7 +111,9 @@ inline bool saveConfig(const Config& c) {
                                   "hotkeys / offset : recalage des zones en jeu (Ctrl+Alt+fleches, voir le README). "
                                   "toggle_key : touche qui active / desactive les zones en jeu (space, f9, ctrl+f9, none...). "
                                   "toggle_joystick_button : numero du bouton du joystick / HOTAS (numerotation de joy.cpl, a partir de 1 ; 0 : aucun) ; "
-                                  "toggle_joystick : morceau du nom du peripherique (vide : n'importe lequel, voir layer.log)."},
+                                  "toggle_joystick : morceau du nom du peripherique (vide : n'importe lequel, voir layer.log). "
+                                  "editor_key / editor_joystick_button / editor_joystick : touche ou bouton de HOTAS qui lance le gestionnaire de zones "
+                                  "(application de la barre d'etat lancee, sans droits administrateur)."},
                         {"enabled", c.enabled},
                         {"mode", c.mode},
                         {"apps", c.apps},
@@ -118,6 +126,9 @@ inline bool saveConfig(const Config& c) {
                         {"toggle_key", c.toggleKey},
                         {"toggle_joystick", c.toggleJoystick},
                         {"toggle_joystick_button", c.toggleJoystickButton},
+                        {"editor_key", c.editorKey},
+                        {"editor_joystick", c.editorJoystick},
+                        {"editor_joystick_button", c.editorJoystickButton},
                         {"offset", {c.offset[0], c.offset[1], c.offset[2]}},
                         {"offset_yaw_deg", c.offsetYawDeg}}
              .dump(2);
