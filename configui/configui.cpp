@@ -1,6 +1,7 @@
 // OverlayVR : fenetre de configuration (settings.json).
 //   - interrupteur general, touche clavier de bascule des zones (on appuie sur la touche pour la choisir) ;
 //   - detection des joysticks / HOTAS branches et du bouton de bascule (on appuie sur le bouton pour le choisir) ;
+//   - touche et bouton de HOTAS qui lancent le gestionnaire de zones (meme principe, onglet « Gestionnaire de zones ») ;
 //   - affichage (regard, bords), jeux concernes.
 // La couche relit settings.json a chaud : les changements sont pris en compte sans relancer le jeu.
 #define NOMINMAX
@@ -33,7 +34,8 @@ enum : int {
     ID_ENABLED = 100, ID_KEYTXT, ID_KEYSET, ID_KEYNONE, ID_JOYDEV, ID_JOYSCAN, ID_BTNTXT, ID_BTNDETECT, ID_BTNNONE,
     ID_LIVE, ID_HINT, ID_GAZE, ID_MARGIN, ID_PASSES, ID_OVERLAP, ID_HOTKEYS, ID_MODE, ID_APPS, ID_SAVE, ID_CLOSE, ID_SAVED,
     ID_TAB, ID_ZLIST, ID_ASSIGN, ID_ASSIGNBTN, ID_ZRELOAD, ID_PLIST, ID_PNAME, ID_PEXE, ID_PNEW, ID_PADD, ID_PDEL,
-    ID_ZNAME, ID_ZRENAME
+    ID_ZNAME, ID_ZRENAME,
+    ID_EDKEYTXT, ID_EDKEYSET, ID_EDKEYNONE, ID_EDBTNTXT, ID_EDBTNDETECT, ID_EDBTNNONE, ID_EDLIVE, ID_EDHINT
 };
 constexpr UINT_PTR kTimer = 1;
 
@@ -53,12 +55,16 @@ std::vector<std::string> g_comboNames;  // nom de joystick de chaque ligne de la
 std::string g_keyText = "space";
 std::string g_joyName;
 int g_joyButton = 0;
-bool g_captureKey = false, g_detect = false;
+std::string g_edKeyText = "ctrl+alt+e";  // touche / bouton qui lancent le gestionnaire de zones
+std::string g_edJoyName;
+int g_edJoyButton = 0;
+int g_captureFor = 0;  // 0 : rien ; 1 : touche de bascule des zones ; 2 : touche du gestionnaire de zones
+int g_detectFor = 0;   // idem pour la detection d'un bouton de joystick
 bool g_keyPrev[256] = {};
 std::wstring g_liveShown;
 int g_dy = 0;                                  // decalage vertical du contenu des onglets (sous la barre d'onglets)
 std::vector<HWND>* g_cur = nullptr;            // onglet en cours de construction
-std::vector<HWND> g_tabs[2];                   // controles de chaque onglet
+std::vector<HWND> g_tabs[3];                   // controles de chaque onglet
 std::vector<ovz::Zone> g_zones;                // zones affichees dans l'onglet « Zones et jeux »
 std::vector<ovz::Profile> g_profiles;          // jeux (profils) de settings.json
 
@@ -156,12 +162,19 @@ void scanDevices() {
     fillCombo();
 }
 
-void showHint(const std::wstring& t) { setText(ID_HINT, t); }
+void showHint(const std::wstring& t) {
+    setText(ID_HINT, t);
+    setText(ID_EDHINT, t);
+}
 
 void refreshTexts() {
     const ovz::KeySpec k = ovz::parseKey(g_keyText);
     setText(ID_KEYTXT, k.vk ? W(ovz::formatKey(k)) : L"(aucune)");
     setText(ID_BTNTXT, g_joyButton > 0 ? L"Bouton " + std::to_wstring(g_joyButton) : L"(aucun)");
+    const ovz::KeySpec ek = ovz::parseKey(g_edKeyText);
+    setText(ID_EDKEYTXT, ek.vk ? W(ovz::formatKey(ek)) : L"(aucune)");
+    setText(ID_EDBTNTXT, g_edJoyButton > 0 ? L"Bouton " + std::to_wstring(g_edJoyButton) + (g_edJoyName.empty() ? L"" : L"  (" + W(g_edJoyName) + L")")
+                                           : L"(aucun)");
 }
 
 // --- chargement / enregistrement -----------------------------------------------------------------------
@@ -172,6 +185,9 @@ void loadIntoUi() {
     g_keyText = c.toggleKey;
     g_joyName = c.toggleJoystick;
     g_joyButton = c.toggleJoystickButton;
+    g_edKeyText = c.editorKey;
+    g_edJoyName = c.editorJoystick;
+    g_edJoyButton = c.editorJoystickButton;
     setChecked(ID_GAZE, c.gazeOnly);
     wchar_t buf[32];
     swprintf_s(buf, L"%g", c.gazeMargin);
@@ -195,6 +211,9 @@ bool save() {
     c.toggleKey = ovz::parseKey(g_keyText).vk ? g_keyText : "none";
     c.toggleJoystick = g_joyName;
     c.toggleJoystickButton = g_joyButton;
+    c.editorKey = ovz::parseKey(g_edKeyText).vk ? g_edKeyText : "none";
+    c.editorJoystick = g_edJoyName;
+    c.editorJoystickButton = g_edJoyButton;
     c.gazeOnly = checked(ID_GAZE);
     c.gazeMargin = std::clamp(static_cast<float>(_wtof(getText(ID_MARGIN).c_str())), 0.0f, 90.0f);
     c.edgePasses = std::clamp(_wtoi(getText(ID_PASSES).c_str()), 1, 6);
@@ -223,15 +242,22 @@ bool isModifierOrMouse(int vk) {
 }
 
 void stopKeyCapture() {
-    g_captureKey = false;
+    g_captureFor = 0;
     setText(ID_KEYSET, L"Définir…");
+    setText(ID_EDKEYSET, L"Définir…");
+}
+
+void stopDetect() {
+    g_detectFor = 0;
+    setText(ID_BTNDETECT, L"Détecter…");
+    setText(ID_EDBTNDETECT, L"Détecter…");
 }
 
 void pollKeys() {
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     for (int vk = 0x08; vk <= 0xFE; vk++) {
         const bool now = down(vk);
-        if (now && !g_keyPrev[vk] && g_captureKey && !isModifierOrMouse(vk)) {
+        if (now && !g_keyPrev[vk] && g_captureFor && !isModifierOrMouse(vk)) {
             if (vk == VK_ESCAPE) {
                 stopKeyCapture();
                 showHint(L"Choix de la touche annulé.");
@@ -241,10 +267,11 @@ void pollKeys() {
                 k.ctrl = down(VK_CONTROL);
                 k.alt = down(VK_MENU);
                 k.shift = down(VK_SHIFT);
-                g_keyText = ovz::formatKey(k);
+                std::string& dst = g_captureFor == 1 ? g_keyText : g_edKeyText;
+                dst = ovz::formatKey(k);
                 stopKeyCapture();
                 refreshTexts();
-                showHint(L"Touche choisie : " + W(g_keyText) + L". Pense à enregistrer.");
+                showHint(L"Touche choisie : " + W(dst) + L". Pense à enregistrer.");
             }
         }
         g_keyPrev[vk] = now;
@@ -265,11 +292,15 @@ void pollJoysticks() {
         for (int i = 0; i < 128; i++) {
             const bool now = (st.rgbButtons[i] & 0x80) != 0;
             if (now) pressed += (pressed.empty() ? L"" : L", ") + std::to_wstring(i + 1);
-            if (now && !d.down[i] && g_detect) {
-                g_detect = false;
-                g_joyName = d.name;
-                g_joyButton = i + 1;
-                setText(ID_BTNDETECT, L"Détecter…");
+            if (now && !d.down[i] && g_detectFor) {
+                if (g_detectFor == 1) {
+                    g_joyName = d.name;
+                    g_joyButton = i + 1;
+                } else {
+                    g_edJoyName = d.name;
+                    g_edJoyButton = i + 1;
+                }
+                stopDetect();
                 fillCombo();
                 refreshTexts();
                 showHint(L"Détecté : bouton " + std::to_wstring(i + 1) + L" de « " + W(d.name) + L" ». Pense à enregistrer.");
@@ -283,6 +314,7 @@ void pollJoysticks() {
     if (live != g_liveShown) {
         g_liveShown = live;
         setText(ID_LIVE, live);
+        setText(ID_EDLIVE, live);
     }
 }
 
@@ -510,7 +542,7 @@ void deleteProfile() {
 }
 
 void showTab(int tab) {
-    for (int t = 0; t < 2; t++)
+    for (int t = 0; t < 3; t++)
         for (HWND h : g_tabs[t]) ShowWindow(h, t == tab ? SW_SHOW : SW_HIDE);
     if (tab == 1) {
         refreshProfiles();
@@ -527,6 +559,8 @@ void build() {
     TabCtrl_InsertItem(tab, 0, &ti);
     ti.pszText = const_cast<wchar_t*>(L"Zones et jeux");
     TabCtrl_InsertItem(tab, 1, &ti);
+    ti.pszText = const_cast<wchar_t*>(L"Gestionnaire de zones");
+    TabCtrl_InsertItem(tab, 2, &ti);
     g_dy = 34;
     g_cur = &g_tabs[0];
 
@@ -607,6 +641,23 @@ void build() {
     make(L"STATIC", L"Nom exact de l'exe : ligne « couche chargée dans … » de layer.log. Un jeu qui a un profil est autorisé "
          L"automatiquement.", SS_LEFT, 24, 500, 552, 20, 0);
 
+    // --- onglet « Gestionnaire de zones » : touche / bouton qui lancent l'editeur du casque ---
+    g_cur = &g_tabs[2];
+    group(L"Lancer le gestionnaire de zones (éditeur du casque)", 10, 10, 580, 278);
+    label(L"Touche clavier", 24, 40, 120);
+    edit(150, 40, 150, ID_EDKEYTXT, true);
+    button(L"Définir…", 310, 39, 90, ID_EDKEYSET);
+    button(L"Aucune", 406, 39, 80, ID_EDKEYNONE);
+    label(L"Bouton joystick / HOTAS", 24, 74, 150);
+    edit(180, 74, 220, ID_EDBTNTXT, true);
+    button(L"Détecter…", 410, 73, 90, ID_EDBTNDETECT);
+    button(L"Aucun", 506, 73, 70, ID_EDBTNNONE);
+    make(L"STATIC", L"", SS_LEFT | WS_BORDER, 24, 110, 552, 52, ID_EDLIVE);
+    make(L"STATIC", L"", SS_LEFT, 24, 168, 552, 44, ID_EDHINT);
+    make(L"STATIC", L"Ces raccourcis sont lus par l'application de la barre d'état (elle doit tourner) : aucun droit administrateur "
+         L"n'est nécessaire. Le gestionnaire ne peut pas tourner pendant qu'un jeu utilise le casque : lance-le jeu fermé. "
+         L"Un seul gestionnaire à la fois ; un bip confirme le lancement. N'oublie pas d'enregistrer.", SS_LEFT, 24, 214, 552, 66, 0);
+
     g_cur = nullptr;
     g_dy = 0;
     make(L"STATIC", L"", SS_LEFT, 12, 592, 380, 20, ID_SAVED);
@@ -620,20 +671,27 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_COMMAND:
             switch (LOWORD(wp)) {
                 case ID_KEYSET:
-                    g_captureKey = !g_captureKey;
-                    if (g_captureKey) {
-                        g_detect = false;
-                        setText(ID_BTNDETECT, L"Détecter…");
-                        setText(ID_KEYSET, L"Annuler");
+                case ID_EDKEYSET: {
+                    const int target = LOWORD(wp) == ID_KEYSET ? 1 : 2;
+                    const bool again = g_captureFor == target;  // second clic = annuler
+                    stopKeyCapture();
+                    stopDetect();
+                    if (!again) {
+                        g_captureFor = target;
+                        setText(target == 1 ? ID_KEYSET : ID_EDKEYSET, L"Annuler");
                         showHint(L"Appuie sur la touche à utiliser (avec Ctrl / Alt / Maj si tu veux), Échap pour annuler…");
                         SetFocus(g_wnd);  // sinon la barre d'espace « clique » encore le bouton
-                    } else {
-                        stopKeyCapture();
                     }
                     break;
+                }
                 case ID_KEYNONE:
                     stopKeyCapture();
                     g_keyText = "none";
+                    refreshTexts();
+                    break;
+                case ID_EDKEYNONE:
+                    stopKeyCapture();
+                    g_edKeyText = "none";
                     refreshTexts();
                     break;
                 case ID_JOYSCAN:
@@ -647,21 +705,29 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     }
                     break;
                 case ID_BTNDETECT:
-                    g_detect = !g_detect;
-                    if (g_detect) {
-                        stopKeyCapture();
-                        setText(ID_BTNDETECT, L"Annuler");
+                case ID_EDBTNDETECT: {
+                    const int target = LOWORD(wp) == ID_BTNDETECT ? 1 : 2;
+                    const bool again = g_detectFor == target;  // second clic = annuler
+                    stopKeyCapture();
+                    stopDetect();
+                    if (!again) {
+                        g_detectFor = target;
+                        setText(target == 1 ? ID_BTNDETECT : ID_EDBTNDETECT, L"Annuler");
                         for (Dev& d : g_devs) std::fill(std::begin(d.down), std::end(d.down), true);  // ignore ce qui est deja enfonce
-                        showHint(g_devs.empty() ? L"Aucun joystick détecté : branche-le puis clique « Rescanner »."
+                        showHint(g_devs.empty() ? L"Aucun joystick détecté : branche-le puis clique « Rescanner » (onglet Général)."
                                                 : L"Appuie maintenant sur le bouton voulu de ton joystick / HOTAS…");
-                    } else {
-                        setText(ID_BTNDETECT, L"Détecter…");
                     }
                     break;
+                }
                 case ID_BTNNONE:
-                    g_detect = false;
-                    setText(ID_BTNDETECT, L"Détecter…");
+                    stopDetect();
                     g_joyButton = 0;
+                    refreshTexts();
+                    break;
+                case ID_EDBTNNONE:
+                    stopDetect();
+                    g_edJoyButton = 0;
+                    g_edJoyName.clear();
                     refreshTexts();
                     break;
                 case ID_ZRENAME:

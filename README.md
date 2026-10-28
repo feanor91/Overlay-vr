@@ -170,8 +170,12 @@ Sans toucher à la souris ni à la fenêtre de configuration : l'**application d
 après l'installation) surveille une touche du clavier et un bouton de joystick / HOTAS, et lance le gestionnaire de zones quand tu
 les actionnes. Rien ne demande les droits administrateur.
 
+**Le plus simple : la fenêtre de configuration**, onglet **Gestionnaire de zones** (clic droit sur l'icône → *Configuration…*) :
+clique **Définir…** puis appuie sur la touche voulue (avec Ctrl / Alt / Maj si tu veux), ou **Détecter…** puis appuie sur le bouton de ton
+HOTAS : le périphérique et le numéro de bouton sont renseignés. Un encart affiche en direct les boutons enfoncés. Clique **Enregistrer**.
+
 - **Clavier** : **Ctrl + Alt + E** par défaut.
-- **HOTAS** : aucun bouton par défaut ; renseigne-le dans `settings.json` (clic droit sur l'icône → *Modifier settings.json*) :
+- **HOTAS** : aucun bouton par défaut. À la main, dans `settings.json` (clic droit sur l'icône → *Modifier settings.json*) :
 
 ```json
 "editor_key": "ctrl+alt+e",
