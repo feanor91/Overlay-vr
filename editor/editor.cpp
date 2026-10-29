@@ -95,6 +95,10 @@ struct EyeSwapchain {
     std::vector<ID3D11RenderTargetView*> rtvs;
     ID3D11Texture2D* depthTex = nullptr;
     ID3D11DepthStencilView* dsv = nullptr;
+    // Profondeur transmise au runtime (XR_KHR_composition_layer_depth) : permet un recalage plus juste quand la tete se deplace.
+    XrSwapchain depthHandle = XR_NULL_HANDLE;
+    std::vector<XrSwapchainImageD3D11KHR> depthImages;
+    std::vector<ID3D11DepthStencilView*> depthDsvs;
 };
 
 class Editor {
@@ -135,6 +139,9 @@ private:
     ID3D11DeviceContext* ctx_ = nullptr;
     Renderer rend_;
     bool running_ = false, quit_ = false;
+    bool depthExt_ = false;      // extension de profondeur disponible
+    bool depthWanted_ = true;    // editor.json : "depth": false pour la couper
+    DXGI_FORMAT depthFormat_ = DXGI_FORMAT_UNKNOWN;
     DXGI_FORMAT colorFormat_ = DXGI_FORMAT_R8G8B8A8_UNORM;
 
     std::vector<Zone> zones_;
@@ -223,14 +230,22 @@ private:
     }
 
     void initOpenXR() {
-        const char* ext[] = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
+        std::vector<const char*> ext = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
+        uint32_t extCount = 0;
+        xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
+        std::vector<XrExtensionProperties> props(extCount, {XR_TYPE_EXTENSION_PROPERTIES});
+        xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, props.data());
+        for (const auto& p : props)
+            if (std::strcmp(p.extensionName, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME) == 0) depthExt_ = true;
+        if (depthExt_ && depthWanted_) ext.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
+        else depthExt_ = false;
         XrInstanceCreateInfo ci = {XR_TYPE_INSTANCE_CREATE_INFO};
         std::strcpy(ci.applicationInfo.applicationName, "OverlayVR Editor");
         ci.applicationInfo.applicationVersion = 1;
         std::strcpy(ci.applicationInfo.engineName, "none");
         ci.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
-        ci.enabledExtensionCount = 1;
-        ci.enabledExtensionNames = ext;
+        ci.enabledExtensionCount = static_cast<uint32_t>(ext.size());
+        ci.enabledExtensionNames = ext.data();
         CHK(xrCreateInstance(&ci, &instance_));
         XrSystemGetInfo si = {XR_TYPE_SYSTEM_GET_INFO};
         si.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
@@ -376,6 +391,14 @@ private:
                 break;
             }
         colorFormat_ = static_cast<DXGI_FORMAT>(chosen);
+        if (depthExt_) {
+            for (DXGI_FORMAT want : {DXGI_FORMAT_D32_FLOAT, DXGI_FORMAT_D16_UNORM, DXGI_FORMAT_D24_UNORM_S8_UINT})
+                if (std::find(formats.begin(), formats.end(), static_cast<int64_t>(want)) != formats.end()) {
+                    depthFormat_ = want;
+                    break;
+                }
+            if (depthFormat_ == DXGI_FORMAT_UNKNOWN) depthExt_ = false;
+        }
 
         eyes_.resize(n);
         for (uint32_t i = 0; i < n; i++) {
@@ -413,7 +436,40 @@ private:
             td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
             dev_->CreateTexture2D(&td, nullptr, &e.depthTex);
             dev_->CreateDepthStencilView(e.depthTex, nullptr, &e.dsv);
+
+            if (depthExt_) {  // swapchain de profondeur ; en cas d'echec on garde le tampon prive (sans profondeur transmise)
+                XrSwapchainCreateInfo ds = sc;
+                ds.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+                ds.format = static_cast<int64_t>(depthFormat_);
+                uint32_t dcnt = 0;
+                if (XR_SUCCEEDED(xrCreateSwapchain(session_, &ds, &e.depthHandle)) &&
+                    XR_SUCCEEDED(xrEnumerateSwapchainImages(e.depthHandle, 0, &dcnt, nullptr)) && dcnt > 0) {
+                    e.depthImages.assign(dcnt, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+                    if (XR_SUCCEEDED(xrEnumerateSwapchainImages(e.depthHandle, dcnt, &dcnt,
+                                                                reinterpret_cast<XrSwapchainImageBaseHeader*>(e.depthImages.data())))) {
+                        for (auto& img : e.depthImages) {
+                            D3D11_DEPTH_STENCIL_VIEW_DESC dv = {};
+                            dv.Format = depthFormat_;
+                            dv.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+                            ID3D11DepthStencilView* view = nullptr;
+                            dev_->CreateDepthStencilView(img.texture, &dv, &view);
+                            e.depthDsvs.push_back(view);
+                        }
+                    }
+                }
+                if (e.depthDsvs.size() != e.depthImages.size() || e.depthDsvs.empty() ||
+                    std::find(e.depthDsvs.begin(), e.depthDsvs.end(), nullptr) != e.depthDsvs.end()) {
+                    if (e.depthHandle) xrDestroySwapchain(e.depthHandle);
+                    e.depthHandle = XR_NULL_HANDLE;
+                    e.depthImages.clear();
+                    e.depthDsvs.clear();
+                }
+            }
         }
+        bool anyDepth = false;
+        for (const EyeSwapchain& e : eyes_) anyDepth = anyDepth || e.depthHandle != XR_NULL_HANDLE;
+        std::printf(anyDepth ? "Profondeur transmise au runtime (essai : recalage plus juste quand la tete bouge)\n"
+                             : "Profondeur non transmise (extension ou format indisponible, ou desactivee dans editor.json)\n");
     }
 
     void pollEvents() {
@@ -526,14 +582,16 @@ private:
         std::ifstream f(ovz::dataDir() / "editor.json");
         if (!f) return;
         try {
-            surfaceY_ = nlohmann::json::parse(f).value("surface_y", surfaceY_);
+            const auto j = nlohmann::json::parse(f);
+            surfaceY_ = j.value("surface_y", surfaceY_);
+            depthWanted_ = j.value("depth", depthWanted_);
         } catch (...) {
         }
     }
     void saveSettings() {
         std::error_code ec;
         std::filesystem::create_directories(ovz::dataDir(), ec);
-        std::ofstream(ovz::dataDir() / "editor.json") << nlohmann::json{{"surface_y", surfaceY_}}.dump(2);
+        std::ofstream(ovz::dataDir() / "editor.json") << nlohmann::json{{"surface_y", surfaceY_}, {"depth", depthWanted_}}.dump(2);
     }
 
     // --- visee ---------------------------------------------------------------------------------------
@@ -1171,6 +1229,7 @@ private:
         }
 
         std::vector<XrCompositionLayerProjectionView> projViews;
+        std::vector<XrCompositionLayerDepthInfoKHR> depthInfos;
         XrCompositionLayerProjection layer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
         const XrCompositionLayerBaseHeader* layers[1] = {};
         uint32_t layerCount = 0;
@@ -1194,6 +1253,7 @@ private:
             CHK(xrLocateViews(session_, &vli, &vs, static_cast<uint32_t>(views.size()), &vc, views.data()));
 
             projViews.assign(vc, {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW});
+            depthInfos.assign(vc, {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR});
             for (uint32_t i = 0; i < vc; i++) {
                 EyeSwapchain& e = eyes_[i];
                 uint32_t idx = 0;
@@ -1201,6 +1261,14 @@ private:
                 XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
                 wi.timeout = XR_INFINITE_DURATION;
                 CHK(xrWaitSwapchainImage(e.handle, &wi));
+                // Profondeur : image du swapchain de profondeur si disponible, sinon tampon prive.
+                bool haveDepth = false;
+                uint32_t didx = 0;
+                if (e.depthHandle != XR_NULL_HANDLE && XR_SUCCEEDED(xrAcquireSwapchainImage(e.depthHandle, nullptr, &didx))) {
+                    if (XR_SUCCEEDED(xrWaitSwapchainImage(e.depthHandle, &wi)) && didx < e.depthDsvs.size()) haveDepth = true;
+                    else xrReleaseSwapchainImage(e.depthHandle, nullptr);
+                }
+                ID3D11DepthStencilView* dsv = haveDepth ? e.depthDsvs[didx] : e.dsv;
 
                 const XrPosef& pp = views[i].pose;
                 const XrFovf& fov = views[i].fov;
@@ -1210,10 +1278,10 @@ private:
 
                 D3D11_VIEWPORT vp = {0, 0, static_cast<float>(e.width), static_cast<float>(e.height), 0, 1};
                 ctx_->RSSetViewports(1, &vp);
-                ctx_->OMSetRenderTargets(1, &e.rtvs[idx], e.dsv);
+                ctx_->OMSetRenderTargets(1, &e.rtvs[idx], dsv);
                 const float magenta[4] = {1, 0, 1, 1};  // fond = passthrough via le chroma key de VD
                 ctx_->ClearRenderTargetView(e.rtvs[idx], magenta);
-                ctx_->ClearDepthStencilView(e.dsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
+                ctx_->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
                 rend_.begin();
                 drawScene();
 
@@ -1222,6 +1290,17 @@ private:
                 projViews[i].fov = fov;
                 projViews[i].subImage.swapchain = e.handle;
                 projViews[i].subImage.imageRect = {{0, 0}, {e.width, e.height}};
+                if (haveDepth) {
+                    xrReleaseSwapchainImage(e.depthHandle, nullptr);
+                    depthInfos[i].subImage.swapchain = e.depthHandle;
+                    depthInfos[i].subImage.imageRect = {{0, 0}, {e.width, e.height}};
+                    depthInfos[i].subImage.imageArrayIndex = 0;
+                    depthInfos[i].minDepth = 0.0f;  // meme plage et memes plans que la matrice de projection (0,05 m - 50 m)
+                    depthInfos[i].maxDepth = 1.0f;
+                    depthInfos[i].nearZ = 0.05f;
+                    depthInfos[i].farZ = 50.0f;
+                    projViews[i].next = &depthInfos[i];
+                }
             }
             layer.space = stage_;
             layer.viewCount = vc;

@@ -55,7 +55,7 @@ struct Renderer {
     ID3D11Buffer *vb = nullptr, *vbQuad = nullptr, *cb = nullptr;
     ID3D11BlendState *blend = nullptr, *blendOff = nullptr;
     ID3D11RasterizerState* raster = nullptr;
-    ID3D11DepthStencilState *depth = nullptr, *depthOff = nullptr;
+    ID3D11DepthStencilState *depth = nullptr, *depthOff = nullptr, *depthPanel = nullptr;
     ID3D11SamplerState* sampler = nullptr;
     Mat4 viewProj;
 
@@ -138,6 +138,9 @@ struct Renderer {
         dev->CreateDepthStencilState(&dd, &depth);
         dd.DepthEnable = FALSE;
         dev->CreateDepthStencilState(&dd, &depthOff);
+        dd.DepthEnable = TRUE;  // panneaux : test et ecriture de profondeur (necessaire si la profondeur est transmise au runtime)
+        dd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+        dev->CreateDepthStencilState(&dd, &depthPanel);
 
         D3D11_SAMPLER_DESC sm = {};
         sm.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -180,7 +183,7 @@ struct Renderer {
         ctx->PSSetShader(psp, nullptr, 0);
         ctx->PSSetSamplers(0, 1, &sampler);
         ctx->OMSetBlendState(blendOff, nullptr, 0xffffffff);
-        ctx->OMSetDepthStencilState(depthOff, 0);
+        ctx->OMSetDepthStencilState(depthPanel, 0);
     }
 
     void panel(const Mat4& world, ID3D11ShaderResourceView* srv) {

@@ -208,6 +208,12 @@ pour la voir). L'icône est un **œil** qui donne l'état : iris **vert** = zone
 
 Pour savoir si la couche pèse sur tes FPS, désactive-la (case décochée), relance le jeu et compare.
 
+**Profondeur transmise (essai)** : l'éditeur envoie aussi à Virtual Desktop une image de profondeur de la scène (extension OpenXR
+`XR_KHR_composition_layer_depth`), pour qu'il puisse recaler les traits plus justement quand la tête se déplace. La console de
+l'éditeur indique au démarrage « Profondeur transmise au runtime » ou « Profondeur non transmise ». Je ne sais pas si Virtual Desktop
+s'en sert : compare avant/après. Pour la couper (si l'éditeur plante ou se comporte moins bien), crée ou modifie
+`%APPDATA%\OverlayVR\editor.json` avec `{ "depth": false }`.
+
 ## Limites et points à valider casque sur la tête
 
 Ce code n'a **pas encore été testé avec un casque** : il compile, la logique mathématique est vérifiée, le reste est à valider.
