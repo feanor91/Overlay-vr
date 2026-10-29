@@ -56,7 +56,7 @@ struct Edit {
         float heading0 = 0, yaw0 = 0;
     } grab;
     std::vector<std::vector<ovz::Zone>> history;
-    XrSwapchain sw = XR_NULL_HANDLE;
+    XrSwapchain sw[6] = {};
     bool swTried = false, swReady = false;
     ULONGLONG lastTick = 0, lastHeartbeat = 0;
     std::string message;
@@ -65,7 +65,7 @@ struct Edit {
 
 bool editOn() { return ed.on; }
 
-constexpr int kSwatch = 16, kSwatchCount = 8;
+constexpr int kColorCount = 6;
 enum Col { kCyan = 0, kYellow, kWhite, kOrange, kGreen, kRed };
 
 float headingOfQ(Q q) {
@@ -393,26 +393,13 @@ bool ensureEditSwapchain() {
     if (ed.swReady) return true;
     if (ed.swTried) return false;
     ed.swTried = true;
-    const int W = kSwatch * kSwatchCount;
-    if (!createColorSwapchain(ed.sw, W, kSwatch)) return false;
-    const unsigned char rgb[kSwatchCount][3] = {{0, 220, 255}, {255, 230, 0}, {255, 255, 255}, {255, 140, 26},
-                                                {50, 255, 50},  {255, 60, 60}, {255, 255, 255}, {255, 255, 255}};
-    const bool rgba = g.format == DXGI_FORMAT_R8G8B8A8_UNORM || g.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-    std::vector<uint8_t> px(static_cast<size_t>(W) * kSwatch * 4);
-    for (int y = 0; y < kSwatch; y++)
-        for (int x = 0; x < W; x++) {
-            uint8_t* p = &px[(static_cast<size_t>(y) * W + x) * 4];
-            const unsigned char* c = rgb[x / kSwatch];
-            p[0] = rgba ? c[0] : c[2];
-            p[1] = c[1];
-            p[2] = rgba ? c[2] : c[0];
-            p[3] = 255;
-        }
-    const ULONGLONG t = GetTickCount64();
-    ed.swReady = uploadPixels(ed.sw, W, kSwatch, px);
-    logf("editeur en jeu : envoi des couleurs en %llu ms", GetTickCount64() - t);
-    logf("editeur en jeu : couleurs %s", ed.swReady ? "ok" : "echec");
-    return ed.swReady;
+    // Une swapchain unie par couleur, remplie comme celle du magenta (chemin deja eprouve) : pas de copie de pixels.
+    const float rgb[kColorCount][4] = {{0, 0.86f, 1, 1}, {1, 0.9f, 0, 1}, {1, 1, 1, 1}, {1, 0.55f, 0.1f, 1}, {0.2f, 1, 0.2f, 1}, {1, 0.25f, 0.25f, 1}};
+    bool ok = true;
+    for (int i = 0; i < kColorCount; i++) ok = ok && createClearedSwapchain(ed.sw[i], rgb[i]);
+    ed.swReady = ok;
+    logf("editeur en jeu : couleurs %s", ok ? "ok" : "echec");
+    return ok;
 }
 
 void addSegment(std::vector<XrCompositionLayerQuad>& out, V3 head, V3 a, V3 b, float thick, Col col) {
@@ -429,8 +416,8 @@ void addSegment(std::vector<XrCompositionLayerQuad>& out, V3 head, V3 a, V3 b, f
     XrCompositionLayerQuad q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
     q.space = g.stage;
     q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-    q.subImage.swapchain = ed.sw;
-    q.subImage.imageRect = {{col * kSwatch + 2, 2}, {kSwatch - 4, kSwatch - 4}};
+    q.subImage.swapchain = ed.sw[col];
+    q.subImage.imageRect = {{0, 0}, {16, 16}};
     q.pose = toXr(mid, quatFromBasis(x, y, z));
     q.size = {len, thick};
     out.push_back(q);
@@ -689,8 +676,10 @@ void ingameReset() {
         if (inp.aimSpace[h]) nx.DestroySpace(inp.aimSpace[h]);
         inp.aimSpace[h] = XR_NULL_HANDLE;
     }
-    if (ed.sw) nx.DestroySwapchain(ed.sw);
-    ed.sw = XR_NULL_HANDLE;
+    for (XrSwapchain& sc : ed.sw) {
+        if (sc) nx.DestroySwapchain(sc);
+        sc = XR_NULL_HANDLE;
+    }
     ed.swTried = ed.swReady = false;
     ed.on = false;
     ed.ph = Ph::Idle;

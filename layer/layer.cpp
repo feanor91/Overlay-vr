@@ -249,7 +249,7 @@ void refreshZones() {
 }
 
 // --- swapchain magenta ----------------------------------------------------------------------
-bool clearD3D11(const XrSwapchainImageD3D11KHR& img) {
+bool clearD3D11(const XrSwapchainImageD3D11KHR& img, const float color[4]) {
     ID3D11RenderTargetView* rtv = nullptr;
     D3D11_RENDER_TARGET_VIEW_DESC desc = {};
     desc.Format = static_cast<DXGI_FORMAT>(g.format);
@@ -257,15 +257,14 @@ bool clearD3D11(const XrSwapchainImageD3D11KHR& img) {
     if (FAILED(g.d3d11->CreateRenderTargetView(img.texture, &desc, &rtv))) return false;
     ID3D11DeviceContext* ctx = nullptr;
     g.d3d11->GetImmediateContext(&ctx);
-    const float magenta[4] = {1, 0, 1, 1};
-    ctx->ClearRenderTargetView(rtv, magenta);
+    ctx->ClearRenderTargetView(rtv, color);
     ctx->Flush();
     ctx->Release();
     rtv->Release();
     return true;
 }
 
-bool clearD3D12(const XrSwapchainImageD3D12KHR& img) {
+bool clearD3D12(const XrSwapchainImageD3D12KHR& img, const float color[4]) {
     ID3D12DescriptorHeap* heap = nullptr;
     ID3D12CommandAllocator* alloc = nullptr;
     ID3D12GraphicsCommandList* list = nullptr;
@@ -284,8 +283,7 @@ bool clearD3D12(const XrSwapchainImageD3D12KHR& img) {
         rd.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
         D3D12_CPU_DESCRIPTOR_HANDLE h = heap->GetCPUDescriptorHandleForHeapStart();
         g.d3d12->CreateRenderTargetView(img.texture, &rd, h);
-        const float magenta[4] = {1, 0, 1, 1};
-        list->ClearRenderTargetView(h, magenta, 0, nullptr);  // l'image est deja en RENDER_TARGET
+        list->ClearRenderTargetView(h, color, 0, nullptr);  // l'image est deja en RENDER_TARGET
         list->Close();
         ID3D12CommandList* lists[] = {list};
         g.queue->ExecuteCommandLists(1, lists);
@@ -303,7 +301,8 @@ bool clearD3D12(const XrSwapchainImageD3D12KHR& img) {
     return ok;
 }
 
-bool createMagentaSwapchain() {
+// Swapchain 16x16 d'une couleur unie (magenta pour les zones ; couleurs de l'editeur en jeu).
+bool createClearedSwapchain(XrSwapchain& out, const float color[4]) {
     uint32_t n = 0;
     nx.EnumerateSwapchainFormats(g.session, 0, &n, nullptr);
     std::vector<int64_t> formats(n);
@@ -311,7 +310,7 @@ bool createMagentaSwapchain() {
     // UNORM d'abord : le magenta sort exactement a (255,0,255) ; le sRGB convient aussi pour 0 et 1.
     const int64_t preferred[] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM,
                                  DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB};
-    g.format = 0;
+    if (!g.format)
     for (int64_t p : preferred)
         if (std::find(formats.begin(), formats.end(), p) != formats.end()) {
             g.format = p;
@@ -327,31 +326,32 @@ bool createMagentaSwapchain() {
     ci.faceCount = 1;
     ci.arraySize = 1;
     ci.mipCount = 1;
-    if (XR_FAILED(nx.CreateSwapchain(g.session, &ci, &g.swapchain))) return false;
+    if (XR_FAILED(nx.CreateSwapchain(g.session, &ci, &out))) return false;
+    const XrSwapchain sc = out;
 
     uint32_t count = 0;
-    nx.EnumerateSwapchainImages(g.swapchain, 0, &count, nullptr);
+    nx.EnumerateSwapchainImages(sc, 0, &count, nullptr);
     std::vector<XrSwapchainImageD3D11KHR> img11;
     std::vector<XrSwapchainImageD3D12KHR> img12;
     if (g.api == Api::D3D11) {
         img11.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-        nx.EnumerateSwapchainImages(g.swapchain, count, &count,
+        nx.EnumerateSwapchainImages(sc, count, &count,
                                     reinterpret_cast<XrSwapchainImageBaseHeader*>(img11.data()));
     } else {
         img12.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
-        nx.EnumerateSwapchainImages(g.swapchain, count, &count,
+        nx.EnumerateSwapchainImages(sc, count, &count,
                                     reinterpret_cast<XrSwapchainImageBaseHeader*>(img12.data()));
     }
 
     uint32_t index = 0;
     XrSwapchainImageAcquireInfo ai = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-    if (XR_FAILED(nx.AcquireSwapchainImage(g.swapchain, &ai, &index))) return false;
+    if (XR_FAILED(nx.AcquireSwapchainImage(sc, &ai, &index))) return false;
     XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
     wi.timeout = XR_INFINITE_DURATION;
-    if (XR_FAILED(nx.WaitSwapchainImage(g.swapchain, &wi))) return false;
-    bool ok = g.api == Api::D3D11 ? clearD3D11(img11[index]) : clearD3D12(img12[index]);
+    if (XR_FAILED(nx.WaitSwapchainImage(sc, &wi))) return false;
+    bool ok = g.api == Api::D3D11 ? clearD3D11(img11[index], color) : clearD3D12(img12[index], color);
     XrSwapchainImageReleaseInfo ri = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-    nx.ReleaseSwapchainImage(g.swapchain, &ri);
+    nx.ReleaseSwapchainImage(sc, &ri);
     return ok;
 }
 
@@ -359,7 +359,8 @@ bool ensureSwapchain() {
     if (g.swapchainReady) return true;
     if (g.swapchainTried) return false;
     g.swapchainTried = true;
-    g.swapchainReady = createMagentaSwapchain();
+    const float magenta[4] = {1, 0, 1, 1};
+    g.swapchainReady = createClearedSwapchain(g.swapchain, magenta);
     logf("swapchain magenta : %s", g.swapchainReady ? "ok" : "echec");
     return g.swapchainReady;
 }
@@ -514,6 +515,7 @@ XrResult XRAPI_CALL ovCreateSession(XrInstance instance, const XrSessionCreateIn
 
     g.session = *session;
     g.swapchain = XR_NULL_HANDLE;
+    g.format = 0;
     g.swapchainTried = g.swapchainReady = false;
 
     XrReferenceSpaceCreateInfo rs = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
