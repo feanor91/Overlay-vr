@@ -135,6 +135,12 @@ inline bool saveZones(const std::filesystem::path& path, const std::vector<Zone>
         arr.push_back(e);
     }
     nlohmann::json root = {{"version", 1}, {"space", "stage"}, {"zones", arr}};
+    Anchor kept;  // sans ancre fournie (fenetre de configuration...), on garde celle deja presente dans le fichier
+    if (!anchor) {
+        std::vector<Zone> ignored;
+        loadZones(path, ignored, &kept);
+        anchor = &kept;
+    }
     if (anchor && anchor->valid) root["anchor"] = {{"pos", {anchor->pos[0], anchor->pos[1], anchor->pos[2]}}, {"yaw", anchor->yaw}};
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);

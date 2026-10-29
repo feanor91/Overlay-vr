@@ -218,7 +218,8 @@ private:
     } grab_;
 
     ovz::Anchor seat_;
-    float thumbHold_ = 0, pressL_[3] = {}, pressR_[3] = {};
+    float thumbHold_ = 0, sumL_[3] = {}, sumR_[3] = {};
+    int nSum_ = 0;
     bool thumbDone_ = false;
     bool showHelp_ = true;
     V3 hudPos_;
@@ -625,8 +626,13 @@ private:
     // memorises retombent sur ceux d'aujourd'hui. Les positions sont celles relevees au debut du clic.
     void recalibrate() {
         ovz::Anchor now;
+        float pressL_[3] = {}, pressR_[3] = {};
+        for (int i = 0; i < 3 && nSum_ > 0; i++) {
+            pressL_[i] = sumL_[i] / nSum_;
+            pressR_[i] = sumR_[i] / nSum_;
+        }
         if (!ovz::anchorFromPoints(pressL_, pressR_, now)) {
-            std::printf("Recalage impossible : pose chaque manette sur un repere, ecartes d'au moins 30 cm\n");
+            std::printf("Recalage impossible : pose chaque manette sur un repere, ecartes d'au moins 30 cm (plus c'est loin, plus c'est precis)\n");
             Beep(400, 200);
             return;
         }
@@ -1108,12 +1114,17 @@ private:
             placeHud();
             hudPlaced_ = true;
         }
-        if (in_.thumbL.down()) {  // positions des deux manettes au moment du clic
-            pressL_[0] = lh.pos.x; pressL_[1] = lh.pos.y; pressL_[2] = lh.pos.z;
-            pressR_[0] = rh.pos.x; pressR_[1] = rh.pos.y; pressR_[2] = rh.pos.z;
+        if (in_.thumbL.down()) {
+            for (int i = 0; i < 3; i++) sumL_[i] = sumR_[i] = 0;
+            nSum_ = 0;
         }
         if (in_.thumbL.now) {
             thumbHold_ += dt;
+            if (thumbHold_ > 0.5f && !thumbDone_) {  // moyenne des positions une fois la main stabilisee (le clic la fait bouger)
+                sumL_[0] += lh.pos.x; sumL_[1] += lh.pos.y; sumL_[2] += lh.pos.z;
+                sumR_[0] += rh.pos.x; sumR_[1] += rh.pos.y; sumR_[2] += rh.pos.z;
+                nSum_++;
+            }
             if (!thumbDone_ && thumbHold_ >= 1.5f) {
                 thumbDone_ = true;
                 recalibrate();
