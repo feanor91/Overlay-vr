@@ -866,8 +866,12 @@ bool uploadD3D12(ID3D12Resource* tex, const std::vector<uint8_t>& px, int W, int
             g.queue->ExecuteCommandLists(1, lists);
             HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
             if (ev && SUCCEEDED(g.queue->Signal(fence, 1)) && SUCCEEDED(fence->SetEventOnCompletion(1, ev))) {
-                WaitForSingleObject(ev, 2000);
-                ok = true;
+                ok = WaitForSingleObject(ev, 150) == WAIT_OBJECT_0;  // attente bornee : jamais de gel du jeu
+                if (!ok) {
+                    logf("panneau : copie GPU trop longue (>150 ms), abandon");
+                    if (ev) CloseHandle(ev);
+                    return false;  // ressources volontairement non liberees : le GPU peut encore les utiliser
+                }
             }
             if (ev) CloseHandle(ev);
         }
@@ -940,7 +944,12 @@ bool refreshHud() {
     std::vector<uint8_t> px;
     if (!drawHudBits(lines, px)) return false;
     const bool ok = uploadPixels(hud.sc, kHudW, kHudH, px);
-    if (ok) hud.last = key;
+    if (ok) {
+        hud.last = key;
+    } else {
+        hud.ready = false;  // pas de nouvelle tentative a chaque image
+        logf("panneau de recalage : echec de l'envoi des pixels, panneau desactive");
+    }
     return ok;
 }
 
@@ -1001,6 +1010,15 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     XrCompositionLayerQuad hudQuad;
     const bool showHud = (GetTickCount64() < hud.until || ed.on) && refreshHud();
     if (showHud) hudQuad = makeHudQuad();
+    if (ed.on) {
+        static ULONGLONG lastQ = 0;
+        const ULONGLONG t = GetTickCount64();
+        if (t - lastQ > 5000) {
+            lastQ = t;
+            logf("editeur en jeu : %zu trait(s), panneau %s, %zu couche(s) du jeu, tete %s", editQuads.size(), showHud ? "affiche" : "ABSENT",
+                 static_cast<size_t>(info->layerCount), haveHead ? "ok" : "inconnue");
+        }
+    }
     if (quads.empty() && editQuads.empty() && !showHud) {
         recordPerf(t0, 0);
         return nx.EndFrame(session, info);

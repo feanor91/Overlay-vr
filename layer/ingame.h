@@ -271,6 +271,7 @@ void editNote(const std::string& text) {
 
 // --- entree / sortie du mode edition ----------------------------------------------------------------
 void editEnter() {
+    logf("editeur en jeu : demande d'ouverture (manettes ajoutees : %s)", inp.attached ? "oui" : "non");
     if (!inp.attached) {
         logf("editeur en jeu : impossible, les manettes n'ont pas pu etre ajoutees (voir plus haut)");
         return;
@@ -303,6 +304,7 @@ void editEnter() {
     editSave();
     ed.on = true;
     ed.lastTick = 0;
+    logf("editeur en jeu : entree (%zu zones)", g.zones.size());
     for (int h = 0; h < 2; h++) {
         ed.trig[h] = ed.grip[h] = Edge();
         ed.tracked[h] = false;
@@ -406,7 +408,9 @@ bool ensureEditSwapchain() {
             p[2] = rgba ? c[2] : c[0];
             p[3] = 255;
         }
+    const ULONGLONG t = GetTickCount64();
     ed.swReady = uploadPixels(ed.sw, W, kSwatch, px);
+    logf("editeur en jeu : envoi des couleurs en %llu ms", GetTickCount64() - t);
     logf("editeur en jeu : couleurs %s", ed.swReady ? "ok" : "echec");
     return ed.swReady;
 }
@@ -459,6 +463,8 @@ void addZoneWire(std::vector<XrCompositionLayerQuad>& out, V3 head, const ovz::Z
 // --- une image d'edition ---------------------------------------------------------------------------
 // Lit les manettes, fait avancer l'edition et ajoute les traits colores a `out`. `head`/`headRot` : pose de la tete (STAGE).
 void editFrame(XrTime displayTime, V3 head, std::vector<XrCompositionLayerQuad>& out) {
+    static int logged = 0;
+    if (logged < 3) logf("editeur en jeu : image %d", ++logged);
     if (!ensureEditSwapchain()) return;
     const ULONGLONG nowMs = GetTickCount64();
     const float dt = ed.lastTick ? std::min(0.1f, (nowMs - ed.lastTick) / 1000.0f) : 0.0f;
@@ -630,6 +636,12 @@ void editFrame(XrTime displayTime, V3 head, std::vector<XrCompositionLayerQuad>&
     }
 
     // --- visuels ---
+    static ULONGLONG lastDiag = 0;
+    if (nowMs - lastDiag > 5000) {
+        lastDiag = nowMs;
+        logf("editeur en jeu : manettes suivies G%d D%d, point vise %d, phase %d, %zu zone(s), tete (%.2f %.2f %.2f)", ed.tracked[0], ed.tracked[1],
+             ed.hasHit, static_cast<int>(ed.ph), g.zones.size(), head.x, head.y, head.z);
+    }
     size_t cap = out.size() + 70;
     for (int h = 0; h < 2; h++) {
         if (!ed.tracked[h]) continue;
