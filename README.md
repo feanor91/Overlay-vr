@@ -19,30 +19,6 @@ Deux programmes, un seul fichier de zones (`%APPDATA%\OverlayVR\zones.json`) :
 3. Dans Virtual Desktop, onglet *Streaming* : active le passthrough par couleur (chroma key) sur **RGB 255, 0, 255**
    et choisis VDXR comme runtime OpenXR.
 
-## Éditeur de zones EN JEU (sans fermer le jeu)
-
-Lancer `OverlayVR_Editor.exe` pendant que MSFS tourne ferme le jeu (Virtual Desktop n'accepte qu'une application VR à la
-fois). L'éditeur est donc aussi intégré à la couche OpenXR, comme Open Kneeboard : il s'ouvre **dans le jeu**.
-
-- **Ouvrir / fermer** : le même raccourci que pour lancer l'éditeur (`editor_key`, défaut Ctrl+Alt+E, ou le bouton de
-  HOTAS, ou le menu de l'icône de la barre d'état). Si un jeu avec la couche tourne, l'application de la barre d'état
-  bascule l'éditeur en jeu au lieu de lancer l'éditeur séparé. **Y** (main gauche) ferme aussi l'éditeur.
-- **Commandes** (rappelées dans un panneau devant toi) : main droite, gâchette = tracer (1er bord, largeur, haut, bas),
-  grip = déplacer la zone visée, B = supprimer, A = plan / volume, stick ▲▼ = hauteur du bureau (clic = hauteur de la
-  manette) ; main gauche, X = annuler. Les traits sont colorés (jaune : zone visée, cyan : zones, orange : tracé).
-- Pendant l'édition, les gâchettes ne font **rien dans le jeu** (ses actions sont suspendues). Les zones du jeu restent visibles
-  en magenta. Les zones créées reçoivent un nom automatique (renomme-les dans la fenêtre de configuration) et le jeu actif.
-- À l'ouverture, le recalage (décalage du jeu) est intégré aux positions des zones, puis remis à zéro.
-- Non pris en charge dans l'éditeur en jeu pour l'instant : formes libres (les zones existantes s'affichent), saisie du nom.
-- Désactivable : `"in_game_editor": false` dans `settings.json`. Le journal `layer.log` indique si les manettes ont pu être
-  ajoutées au jeu (« editeur en jeu : entrees des manettes ajoutees »).
-
-### Bouton dans la barre d'outils de MSFS (essai)
-
-Le dossier `msfs-toolbar/overlayvr-panel` (dans le zip) est un paquet pour le dossier Community de MSFS 2024 : un panneau
-avec un bouton qui ouvre / ferme l'éditeur en jeu, via l'application de la barre d'état (serveur local `127.0.0.1:47321`).
-Non vérifié : voir `msfs-toolbar/LISEZ-MOI.txt`. Le raccourci clavier / HOTAS fait la même chose.
-
 ## Utilisation
 
 1. Dans le casque, lance `OverlayVR_Editor.exe` depuis le bureau Virtual Desktop. Le fond est du passthrough.
@@ -112,11 +88,6 @@ Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Jour
 `couche chargée dans XXX.exe` donne le nom exact à copier dans `apps` (le nom de l'application OpenXR marche aussi).
 
 ## Recaler les zones en jeu (au clavier)
-
-**Panneau de recalage dans le casque** : dès que tu appuies sur Ctrl+Alt en jeu, un panneau s'affiche devant toi (un peu
-sous le regard) avec le décalage actuel du jeu (X, hauteur, Z, rotation) et la liste des touches ; il disparaît 5 s après
-la dernière touche. Il est dessiné par la couche, donc visible dans tout jeu OpenXR. La couche ne lit pas les manettes :
-le panneau se pilote au clavier (ou aux boutons d'un HOTAS configurés comme touches).
 
 Le repère de la pièce n'est pas toujours exactement le même d'une session à l'autre : toutes les zones peuvent se retrouver
 légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :

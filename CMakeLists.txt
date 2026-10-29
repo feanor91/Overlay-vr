@@ -24,7 +24,7 @@ add_library(overlayvr_layer SHARED layer/layer.cpp)
 set_target_properties(overlayvr_layer PROPERTIES
   OUTPUT_NAME XR_APILAYER_OVERLAYVR_zones
   PREFIX "")
-target_link_libraries(overlayvr_layer PRIVATE OpenXR::headers nlohmann_json::nlohmann_json dxguid dinput8 gdi32 user32)
+target_link_libraries(overlayvr_layer PRIVATE OpenXR::headers nlohmann_json::nlohmann_json dxguid dinput8)
 add_custom_command(TARGET overlayvr_layer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_SOURCE_DIR}/layer/XR_APILAYER_OVERLAYVR_zones.json $<TARGET_FILE_DIR:overlayvr_layer>)
@@ -45,7 +45,7 @@ add_custom_command(TARGET overlayvr_layer POST_BUILD
 add_executable(overlayvr_tray WIN32 tray/tray.cpp)
 set_target_properties(overlayvr_tray PROPERTIES OUTPUT_NAME OverlayVR_Tray)
 target_compile_definitions(overlayvr_tray PRIVATE UNICODE _UNICODE)
-target_link_libraries(overlayvr_tray PRIVATE OpenXR::headers nlohmann_json::nlohmann_json shell32 advapi32 user32 gdi32 dinput8 dxguid ws2_32)
+target_link_libraries(overlayvr_tray PRIVATE OpenXR::headers nlohmann_json::nlohmann_json shell32 advapi32 user32 gdi32 dinput8 dxguid)
 
 # Fenetre de configuration : touche / bouton de joystick de bascule, affichage, jeux concernes.
 add_executable(overlayvr_config WIN32 configui/configui.cpp)

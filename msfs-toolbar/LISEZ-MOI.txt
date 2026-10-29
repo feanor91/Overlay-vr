@@ -1,9 +1,0 @@
-Bouton OverlayVR pour la barre d'outils de MSFS (ESSAI, non verifie : la doc des panneaux de barre d'outils de MSFS 2024
-est lacunaire et je n'ai pas pu le tester).
-
-1. Copie le dossier "overlayvr-panel" dans le dossier Community de MSFS 2024.
-2. Lance l'application de la barre d'etat OverlayVR (elle ecoute sur 127.0.0.1:47321) puis MSFS.
-3. Cherche l'icone "OverlayVR" dans la barre d'outils de MSFS ; le bouton ouvre / ferme l'editeur de zones en jeu.
-
-Si l'icone n'apparait pas : le raccourci Ctrl+Alt+E (ou le bouton HOTAS) fait la meme chose. Si le fichier layout.json est
-refuse, regenere-le avec l'outil MSFSLayoutGenerator du SDK MSFS.

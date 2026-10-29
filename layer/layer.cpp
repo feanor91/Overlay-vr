@@ -21,8 +21,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -118,17 +116,6 @@ struct Next {
     PFN_xrAcquireSwapchainImage AcquireSwapchainImage = nullptr;
     PFN_xrWaitSwapchainImage WaitSwapchainImage = nullptr;
     PFN_xrReleaseSwapchainImage ReleaseSwapchainImage = nullptr;
-    // Entrees de l'editeur en jeu.
-    PFN_xrStringToPath StringToPath = nullptr;
-    PFN_xrCreateActionSet CreateActionSet = nullptr;
-    PFN_xrCreateAction CreateAction = nullptr;
-    PFN_xrSuggestInteractionProfileBindings SuggestBindings = nullptr;
-    PFN_xrAttachSessionActionSets AttachActionSets = nullptr;
-    PFN_xrSyncActions SyncActions = nullptr;
-    PFN_xrGetActionStateBoolean GetBool = nullptr;
-    PFN_xrGetActionStateFloat GetFloat = nullptr;
-    PFN_xrGetActionStateVector2f GetVec2 = nullptr;
-    PFN_xrCreateActionSpace CreateActionSpace = nullptr;
 } nx;
 
 enum class Api { None, D3D11, D3D12 };
@@ -177,21 +164,6 @@ struct State {
     ULONGLONG lastEnum = 0;
 } g;
 
-// Panneau de recalage affiche dans le casque (voir plus bas).
-constexpr int kHudW = 900, kHudH = 200;
-struct Hud {
-    XrSwapchain sc = XR_NULL_HANDLE;
-    bool tried = false, ready = false;
-    std::wstring last;
-    ULONGLONG until = 0;
-} hud;
-
-void ingameReset();
-void ingamePoll();
-bool editOn();
-std::vector<std::wstring> editHudLines();
-
-
 // --- reglages et zones (rechargees a chaud) -----------------------------------------------------
 // Decalage de recalage du jeu courant : celui de son profil, sinon le decalage commun.
 float* contextOffset() { return g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].offset : g.cfg.offset; }
@@ -231,7 +203,6 @@ void refreshZones() {
     g.lastCheck = now;
     refreshConfig();
     if (!g.active) return;
-    ingamePoll();
     auto path = ovz::zonesPath();
     WIN32_FILE_ATTRIBUTE_DATA attr;
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attr)) {
@@ -249,7 +220,7 @@ void refreshZones() {
 }
 
 // --- swapchain magenta ----------------------------------------------------------------------
-bool clearD3D11(const XrSwapchainImageD3D11KHR& img, const float color[4]) {
+bool clearD3D11(const XrSwapchainImageD3D11KHR& img) {
     ID3D11RenderTargetView* rtv = nullptr;
     D3D11_RENDER_TARGET_VIEW_DESC desc = {};
     desc.Format = static_cast<DXGI_FORMAT>(g.format);
@@ -257,14 +228,15 @@ bool clearD3D11(const XrSwapchainImageD3D11KHR& img, const float color[4]) {
     if (FAILED(g.d3d11->CreateRenderTargetView(img.texture, &desc, &rtv))) return false;
     ID3D11DeviceContext* ctx = nullptr;
     g.d3d11->GetImmediateContext(&ctx);
-    ctx->ClearRenderTargetView(rtv, color);
+    const float magenta[4] = {1, 0, 1, 1};
+    ctx->ClearRenderTargetView(rtv, magenta);
     ctx->Flush();
     ctx->Release();
     rtv->Release();
     return true;
 }
 
-bool clearD3D12(const XrSwapchainImageD3D12KHR& img, const float color[4]) {
+bool clearD3D12(const XrSwapchainImageD3D12KHR& img) {
     ID3D12DescriptorHeap* heap = nullptr;
     ID3D12CommandAllocator* alloc = nullptr;
     ID3D12GraphicsCommandList* list = nullptr;
@@ -283,7 +255,8 @@ bool clearD3D12(const XrSwapchainImageD3D12KHR& img, const float color[4]) {
         rd.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
         D3D12_CPU_DESCRIPTOR_HANDLE h = heap->GetCPUDescriptorHandleForHeapStart();
         g.d3d12->CreateRenderTargetView(img.texture, &rd, h);
-        list->ClearRenderTargetView(h, color, 0, nullptr);  // l'image est deja en RENDER_TARGET
+        const float magenta[4] = {1, 0, 1, 1};
+        list->ClearRenderTargetView(h, magenta, 0, nullptr);  // l'image est deja en RENDER_TARGET
         list->Close();
         ID3D12CommandList* lists[] = {list};
         g.queue->ExecuteCommandLists(1, lists);
@@ -301,8 +274,7 @@ bool clearD3D12(const XrSwapchainImageD3D12KHR& img, const float color[4]) {
     return ok;
 }
 
-// Swapchain 16x16 d'une couleur unie (magenta pour les zones ; couleurs de l'editeur en jeu).
-bool createClearedSwapchain(XrSwapchain& out, const float color[4]) {
+bool createMagentaSwapchain() {
     uint32_t n = 0;
     nx.EnumerateSwapchainFormats(g.session, 0, &n, nullptr);
     std::vector<int64_t> formats(n);
@@ -310,7 +282,7 @@ bool createClearedSwapchain(XrSwapchain& out, const float color[4]) {
     // UNORM d'abord : le magenta sort exactement a (255,0,255) ; le sRGB convient aussi pour 0 et 1.
     const int64_t preferred[] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM,
                                  DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB};
-    if (!g.format)
+    g.format = 0;
     for (int64_t p : preferred)
         if (std::find(formats.begin(), formats.end(), p) != formats.end()) {
             g.format = p;
@@ -326,32 +298,31 @@ bool createClearedSwapchain(XrSwapchain& out, const float color[4]) {
     ci.faceCount = 1;
     ci.arraySize = 1;
     ci.mipCount = 1;
-    if (XR_FAILED(nx.CreateSwapchain(g.session, &ci, &out))) return false;
-    const XrSwapchain sc = out;
+    if (XR_FAILED(nx.CreateSwapchain(g.session, &ci, &g.swapchain))) return false;
 
     uint32_t count = 0;
-    nx.EnumerateSwapchainImages(sc, 0, &count, nullptr);
+    nx.EnumerateSwapchainImages(g.swapchain, 0, &count, nullptr);
     std::vector<XrSwapchainImageD3D11KHR> img11;
     std::vector<XrSwapchainImageD3D12KHR> img12;
     if (g.api == Api::D3D11) {
         img11.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-        nx.EnumerateSwapchainImages(sc, count, &count,
+        nx.EnumerateSwapchainImages(g.swapchain, count, &count,
                                     reinterpret_cast<XrSwapchainImageBaseHeader*>(img11.data()));
     } else {
         img12.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
-        nx.EnumerateSwapchainImages(sc, count, &count,
+        nx.EnumerateSwapchainImages(g.swapchain, count, &count,
                                     reinterpret_cast<XrSwapchainImageBaseHeader*>(img12.data()));
     }
 
     uint32_t index = 0;
     XrSwapchainImageAcquireInfo ai = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-    if (XR_FAILED(nx.AcquireSwapchainImage(sc, &ai, &index))) return false;
+    if (XR_FAILED(nx.AcquireSwapchainImage(g.swapchain, &ai, &index))) return false;
     XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
     wi.timeout = XR_INFINITE_DURATION;
-    if (XR_FAILED(nx.WaitSwapchainImage(sc, &wi))) return false;
-    bool ok = g.api == Api::D3D11 ? clearD3D11(img11[index], color) : clearD3D12(img12[index], color);
+    if (XR_FAILED(nx.WaitSwapchainImage(g.swapchain, &wi))) return false;
+    bool ok = g.api == Api::D3D11 ? clearD3D11(img11[index]) : clearD3D12(img12[index]);
     XrSwapchainImageReleaseInfo ri = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-    nx.ReleaseSwapchainImage(sc, &ri);
+    nx.ReleaseSwapchainImage(g.swapchain, &ri);
     return ok;
 }
 
@@ -359,8 +330,7 @@ bool ensureSwapchain() {
     if (g.swapchainReady) return true;
     if (g.swapchainTried) return false;
     g.swapchainTried = true;
-    const float magenta[4] = {1, 0, 1, 1};
-    g.swapchainReady = createClearedSwapchain(g.swapchain, magenta);
+    g.swapchainReady = createMagentaSwapchain();
     logf("swapchain magenta : %s", g.swapchainReady ? "ok" : "echec");
     return g.swapchainReady;
 }
@@ -515,7 +485,6 @@ XrResult XRAPI_CALL ovCreateSession(XrInstance instance, const XrSessionCreateIn
 
     g.session = *session;
     g.swapchain = XR_NULL_HANDLE;
-    g.format = 0;
     g.swapchainTried = g.swapchainReady = false;
 
     XrReferenceSpaceCreateInfo rs = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
@@ -535,9 +504,6 @@ XrResult XRAPI_CALL ovCreateSession(XrInstance instance, const XrSessionCreateIn
 XrResult XRAPI_CALL ovDestroySession(XrSession session) {
     if (session == g.session) {
         if (g.swapchain) nx.DestroySwapchain(g.swapchain);
-        if (hud.sc) nx.DestroySwapchain(hud.sc);
-        hud = Hud();
-        ingameReset();
         if (g.stage) nx.DestroySpace(g.stage);
         if (g.view) nx.DestroySpace(g.view);
         g.swapchain = XR_NULL_HANDLE;
@@ -589,7 +555,6 @@ void updateHotkeys(V3 fwd) {
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     bool changed = false;
     if (down(VK_CONTROL) && down(VK_MENU)) {
-        hud.until = now + 5000;  // le panneau reste affiche 5 s apres la derniere touche
         const float move = (down(VK_SHIFT) ? 0.15f : 0.03f) * dt, turn = (down(VK_SHIFT) ? 15.0f : 3.0f) * dt;
         V3 f = {fwd.x, 0, fwd.z};
         const float n = ovm::length(f);
@@ -748,226 +713,6 @@ void recordPerf(const LARGE_INTEGER& t0, size_t layers) {
     }
 }
 
-// --- panneau de recalage dans le casque ---------------------------------------------------------
-// Texte GDI -> texture d'une couche quad collee a la tete (espace VIEW). Affiche pendant Ctrl+Alt et quelques secondes apres.
-// La couche ne lit pas les manettes : le panneau montre l'etat et les touches du clavier qui pilotent le recalage.
-std::wstring widenUtf8(const std::string& s) {
-    if (s.empty()) return L"";
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring w(n, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
-    return w;
-}
-
-std::vector<std::wstring> hudLines() {
-    if (editOn()) return editHudLines();
-    const float* o = contextOffset();
-    wchar_t buf[200];
-    std::swprintf(buf, 200, L"Décalage :  X %+.2f m    hauteur %+.2f m    Z %+.2f m    rotation %+.1f°", o[0], o[1], o[2], contextYaw());
-    const std::wstring game = g.profileIdx >= 0 ? widenUtf8(g.cfg.profiles[g.profileIdx].name) : L"tous les jeux";
-    return {L"OverlayVR - recalage des zones (" + game + L")", buf,
-            L"Ctrl+Alt + flèches : déplacer (selon ton regard)   PgHaut/PgBas : hauteur",
-            L"Ctrl+Alt + Inser / Suppr : tourner      Maj : grands pas      Origine : remise à zéro",
-            L"Regarde droit devant toi ; les réglages sont enregistrés pour ce jeu."};
-}
-
-bool drawHudBits(const std::vector<std::wstring>& lines, std::vector<uint8_t>& px) {
-    BITMAPINFO bi = {};
-    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
-    bi.bmiHeader.biWidth = kHudW;
-    bi.bmiHeader.biHeight = -kHudH;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    void* bits = nullptr;
-    HDC dc = CreateCompatibleDC(nullptr);
-    HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-    if (!dc || !bmp || !bits) {
-        if (bmp) DeleteObject(bmp);
-        if (dc) DeleteDC(dc);
-        return false;
-    }
-    HGDIOBJ oldBmp = SelectObject(dc, bmp);
-    HBRUSH bg = CreateSolidBrush(RGB(18, 22, 34));  // fond sombre : jamais proche du magenta de la cle chroma
-    RECT all = {0, 0, kHudW, kHudH};
-    FillRect(dc, &all, bg);
-    DeleteObject(bg);
-    HFONT font = CreateFontW(-21, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    HGDIOBJ oldFont = SelectObject(dc, font);
-    SetBkMode(dc, TRANSPARENT);
-    int y = 10;
-    for (size_t i = 0; i < lines.size(); i++) {
-        SetTextColor(dc, i == 0 ? RGB(255, 210, 60) : i == 1 ? RGB(120, 255, 160) : RGB(235, 235, 235));
-        TextOutW(dc, 14, y, lines[i].c_str(), static_cast<int>(lines[i].size()));
-        y += 36;
-    }
-    GdiFlush();
-    px.assign(static_cast<uint8_t*>(bits), static_cast<uint8_t*>(bits) + static_cast<size_t>(kHudW) * kHudH * 4);
-    SelectObject(dc, oldFont);
-    DeleteObject(font);
-    SelectObject(dc, oldBmp);
-    DeleteObject(bmp);
-    DeleteDC(dc);
-    const bool rgba = g.format == DXGI_FORMAT_R8G8B8A8_UNORM || g.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-    for (size_t i = 0; i < px.size(); i += 4) {
-        if (rgba) std::swap(px[i], px[i + 2]);
-        px[i + 3] = 255;
-    }
-    return true;
-}
-
-bool uploadD3D12(ID3D12Resource* tex, const std::vector<uint8_t>& px, int W, int H) {
-    const UINT pitch = (W * 4 + 255) & ~255u;
-    ID3D12Resource* up = nullptr;
-    ID3D12CommandAllocator* alloc = nullptr;
-    ID3D12GraphicsCommandList* list = nullptr;
-    ID3D12Fence* fence = nullptr;
-    bool ok = false;
-    D3D12_HEAP_PROPERTIES hp = {};
-    hp.Type = D3D12_HEAP_TYPE_UPLOAD;
-    D3D12_RESOURCE_DESC rd = {};
-    rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    rd.Width = static_cast<UINT64>(pitch) * H;
-    rd.Height = 1;
-    rd.DepthOrArraySize = 1;
-    rd.MipLevels = 1;
-    rd.SampleDesc.Count = 1;
-    rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    if (SUCCEEDED(g.d3d12->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                   IID_PPV_ARGS(&up))) &&
-        SUCCEEDED(g.d3d12->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))) &&
-        SUCCEEDED(g.d3d12->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, nullptr, IID_PPV_ARGS(&list))) &&
-        SUCCEEDED(g.d3d12->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
-        uint8_t* dst = nullptr;
-        D3D12_RANGE none = {0, 0};
-        if (SUCCEEDED(up->Map(0, &none, reinterpret_cast<void**>(&dst)))) {
-            for (int y = 0; y < H; y++) std::memcpy(dst + static_cast<size_t>(y) * pitch, &px[static_cast<size_t>(y) * W * 4], W * 4);
-            up->Unmap(0, nullptr);
-            D3D12_RESOURCE_BARRIER b = {};
-            b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            b.Transition.pResource = tex;
-            b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
-            list->ResourceBarrier(1, &b);
-            D3D12_TEXTURE_COPY_LOCATION d = {}, sl = {};
-            d.pResource = tex;
-            d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-            sl.pResource = up;
-            sl.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-            sl.PlacedFootprint.Footprint.Format = static_cast<DXGI_FORMAT>(g.format);
-            sl.PlacedFootprint.Footprint.Width = W;
-            sl.PlacedFootprint.Footprint.Height = H;
-            sl.PlacedFootprint.Footprint.Depth = 1;
-            sl.PlacedFootprint.Footprint.RowPitch = pitch;
-            list->CopyTextureRegion(&d, 0, 0, 0, &sl, nullptr);
-            std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
-            list->ResourceBarrier(1, &b);
-            list->Close();
-            ID3D12CommandList* lists[] = {list};
-            g.queue->ExecuteCommandLists(1, lists);
-            HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-            if (ev && SUCCEEDED(g.queue->Signal(fence, 1)) && SUCCEEDED(fence->SetEventOnCompletion(1, ev))) {
-                ok = WaitForSingleObject(ev, 150) == WAIT_OBJECT_0;  // attente bornee : jamais de gel du jeu
-                if (!ok) {
-                    logf("panneau : copie GPU trop longue (>150 ms), abandon");
-                    if (ev) CloseHandle(ev);
-                    return false;  // ressources volontairement non liberees : le GPU peut encore les utiliser
-                }
-            }
-            if (ev) CloseHandle(ev);
-        }
-    }
-    if (fence) fence->Release();
-    if (list) list->Release();
-    if (alloc) alloc->Release();
-    if (up) up->Release();
-    return ok;
-}
-
-bool createColorSwapchain(XrSwapchain& out, int W, int H) {
-    XrSwapchainCreateInfo ci = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
-    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
-    ci.format = g.format;
-    ci.sampleCount = 1;
-    ci.width = W;
-    ci.height = H;
-    ci.faceCount = 1;
-    ci.arraySize = 1;
-    ci.mipCount = 1;
-    return XR_SUCCEEDED(nx.CreateSwapchain(g.session, &ci, &out));
-}
-
-// Copie des pixels (deja dans l'ordre de canaux du format de la swapchain) dans une nouvelle image de la swapchain.
-bool uploadPixels(XrSwapchain sc, int W, int H, const std::vector<uint8_t>& px) {
-    uint32_t count = 0;
-    nx.EnumerateSwapchainImages(sc, 0, &count, nullptr);
-    std::vector<XrSwapchainImageD3D11KHR> img11;
-    std::vector<XrSwapchainImageD3D12KHR> img12;
-    if (g.api == Api::D3D11) {
-        img11.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
-        nx.EnumerateSwapchainImages(sc, count, &count, reinterpret_cast<XrSwapchainImageBaseHeader*>(img11.data()));
-    } else {
-        img12.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
-        nx.EnumerateSwapchainImages(sc, count, &count, reinterpret_cast<XrSwapchainImageBaseHeader*>(img12.data()));
-    }
-    uint32_t index = 0;
-    XrSwapchainImageAcquireInfo ai = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
-    if (XR_FAILED(nx.AcquireSwapchainImage(sc, &ai, &index))) return false;
-    XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
-    wi.timeout = XR_INFINITE_DURATION;
-    bool ok = XR_SUCCEEDED(nx.WaitSwapchainImage(sc, &wi));
-    if (ok && g.api == Api::D3D11) {
-        ID3D11DeviceContext* ctx = nullptr;
-        g.d3d11->GetImmediateContext(&ctx);
-        ctx->UpdateSubresource(img11[index].texture, 0, nullptr, px.data(), W * 4, 0);
-        ctx->Flush();
-        ctx->Release();
-    } else if (ok) {
-        ok = uploadD3D12(img12[index].texture, px, W, H);
-    }
-    XrSwapchainImageReleaseInfo ri = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-    nx.ReleaseSwapchainImage(sc, &ri);
-    return ok;
-}
-
-// Redessine le panneau si le texte a change. Faux : panneau inutilisable (on ne l'affiche pas).
-bool refreshHud() {
-    if (!hud.tried) {
-        hud.tried = true;
-        hud.ready = createColorSwapchain(hud.sc, kHudW, kHudH);
-        logf("panneau de recalage : %s", hud.ready ? "ok" : "echec");
-    }
-    if (!hud.ready) return false;
-    const std::vector<std::wstring> lines = hudLines();
-    std::wstring key;
-    for (auto& l : lines) key += l + L"\n";
-    if (key == hud.last) return true;
-    std::vector<uint8_t> px;
-    if (!drawHudBits(lines, px)) return false;
-    const bool ok = uploadPixels(hud.sc, kHudW, kHudH, px);
-    if (ok) {
-        hud.last = key;
-    } else {
-        hud.ready = false;  // pas de nouvelle tentative a chaque image
-        logf("panneau de recalage : echec de l'envoi des pixels, panneau desactive");
-    }
-    return ok;
-}
-
-XrCompositionLayerQuad makeHudQuad() {
-    XrCompositionLayerQuad quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-    quad.space = g.view;
-    quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-    quad.subImage.swapchain = hud.sc;
-    quad.subImage.imageRect = {{0, 0}, {kHudW, kHudH}};
-    quad.pose = toXr(V3{0, -0.14f, -0.85f}, Q{0, 0, 0, 1});
-    quad.size = {0.62f, 0.62f * kHudH / kHudW};
-    return quad;
-}
-
-#include "ingame.h"
-
 XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     if (g.disabled || session != g.session || g.api == Api::None) return nx.EndFrame(session, info);
     LARGE_INTEGER t0;
@@ -976,7 +721,7 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     pollToggleKey();
     pollToggleJoystick();
     refreshZones();
-    if (!g.active || (g.shown.empty() && !ed.on) || !ensureSwapchain()) {
+    if (!g.active || g.shown.empty() || !ensureSwapchain()) {
         recordPerf(t0, 0);
         return nx.EndFrame(session, info);
     }
@@ -1001,28 +746,13 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     std::vector<XrCompositionLayerQuad> quads;
     quads.reserve(g.shown.size() * 3 + 8);
     for (const ovz::Zone& z : g.shown) {
-        if (ed.on) break;  // edition : seuls les traits de l'editeur sont ajoutes (chaque couche pese sur les fps)
         if (!z.enabled) continue;
         if (z.look > 0 && haveHead && pitchDown < z.look) continue;
-        if (g.cfg.gazeOnly && !ed.on && haveHead && !inGaze(z, head, fwd)) continue;
+        if (g.cfg.gazeOnly && haveHead && !inGaze(z, head, fwd)) continue;
         if (quads.size() > 40) break;  // plafond de couches : chacune pese sur le GPU
         addZoneQuads(z, haveHead, head, quads);
     }
-    std::vector<XrCompositionLayerQuad> editQuads;
-    if (ed.on && haveHead) editFrame(info->displayTime, head, editQuads);
-    XrCompositionLayerQuad hudQuad;
-    const bool showHud = (GetTickCount64() < hud.until || ed.on) && refreshHud();
-    if (showHud) hudQuad = makeHudQuad();
-    if (ed.on) {
-        static ULONGLONG lastQ = 0;
-        const ULONGLONG t = GetTickCount64();
-        if (t - lastQ > 5000) {
-            lastQ = t;
-            logf("editeur en jeu : %zu trait(s), panneau %s, %zu couche(s) du jeu, tete %s", editQuads.size(), showHud ? "affiche" : "ABSENT",
-                 static_cast<size_t>(info->layerCount), haveHead ? "ok" : "inconnue");
-        }
-    }
-    if (quads.empty() && editQuads.empty() && !showHud) {
+    if (quads.empty()) {
         recordPerf(t0, 0);
         return nx.EndFrame(session, info);
     }
@@ -1030,15 +760,13 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     // Chaque face est superposee plusieurs fois : un pixel de bord couvert a moitie passe a 75 %, 87 %... de magenta,
     // et Virtual Desktop l'efface avec le reste au lieu de laisser un liseré rose. Plafond de couches : chaque couche pese sur le GPU.
     const size_t base = quads.size();
-    const size_t passes = base ? std::clamp<size_t>(24 / base, 1, static_cast<size_t>(g.cfg.edgePasses)) : 1;
+    const size_t passes = std::clamp<size_t>(24 / base, 1, static_cast<size_t>(g.cfg.edgePasses));
     quads.reserve(base * passes);
     for (size_t p = 1; p < passes; p++)
         for (size_t i = 0; i < base; i++) quads.push_back(quads[i]);
 
     std::vector<const XrCompositionLayerBaseHeader*> layers(info->layers, info->layers + info->layerCount);
     for (auto& q : quads) layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q));
-    for (auto& q : editQuads) layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q));
-    if (showHud) layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&hudQuad));  // en dernier : au-dessus
     XrFrameEndInfo modified = *info;
     modified.layerCount = static_cast<uint32_t>(layers.size());
     modified.layers = layers.data();
@@ -1062,20 +790,6 @@ XrResult XRAPI_CALL ovGetInstanceProcAddr(XrInstance instance, const char* name,
         if (!std::strcmp(name, "xrDestroySession")) {
             *function = reinterpret_cast<PFN_xrVoidFunction>(ovDestroySession);
             return XR_SUCCESS;
-        }
-        if (g.active && g.cfg.inGameEditor) {
-            if (!std::strcmp(name, "xrSuggestInteractionProfileBindings")) {
-                *function = reinterpret_cast<PFN_xrVoidFunction>(ovSuggestBindings);
-                return XR_SUCCESS;
-            }
-            if (!std::strcmp(name, "xrAttachSessionActionSets")) {
-                *function = reinterpret_cast<PFN_xrVoidFunction>(ovAttachActionSets);
-                return XR_SUCCESS;
-            }
-            if (!std::strcmp(name, "xrSyncActions")) {
-                *function = reinterpret_cast<PFN_xrVoidFunction>(ovSyncActionSets);
-                return XR_SUCCESS;
-            }
         }
         if (!std::strcmp(name, "xrEndFrame")) {
             *function = reinterpret_cast<PFN_xrVoidFunction>(ovEndFrame);
@@ -1121,16 +835,6 @@ XrResult XRAPI_CALL ovCreateApiLayerInstance(const XrInstanceCreateInfo* info, c
     fetch(*instance, "xrAcquireSwapchainImage", nx.AcquireSwapchainImage);
     fetch(*instance, "xrWaitSwapchainImage", nx.WaitSwapchainImage);
     fetch(*instance, "xrReleaseSwapchainImage", nx.ReleaseSwapchainImage);
-    fetch(*instance, "xrStringToPath", nx.StringToPath);
-    fetch(*instance, "xrCreateActionSet", nx.CreateActionSet);
-    fetch(*instance, "xrCreateAction", nx.CreateAction);
-    fetch(*instance, "xrSuggestInteractionProfileBindings", nx.SuggestBindings);
-    fetch(*instance, "xrAttachSessionActionSets", nx.AttachActionSets);
-    fetch(*instance, "xrSyncActions", nx.SyncActions);
-    fetch(*instance, "xrGetActionStateBoolean", nx.GetBool);
-    fetch(*instance, "xrGetActionStateFloat", nx.GetFloat);
-    fetch(*instance, "xrGetActionStateVector2f", nx.GetVec2);
-    fetch(*instance, "xrCreateActionSpace", nx.CreateActionSpace);
 
     char path[MAX_PATH] = {};
     GetModuleFileNameA(nullptr, path, MAX_PATH);

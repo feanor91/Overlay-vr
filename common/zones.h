@@ -5,7 +5,6 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
-#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>

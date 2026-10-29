@@ -10,7 +10,6 @@
 #ifndef _UNICODE
 #define _UNICODE
 #endif
-#include <winsock2.h>
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
@@ -18,9 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <cwchar>
-#include <fstream>
 #include <string>
 
 #include "../common/config.h"
@@ -220,29 +217,7 @@ bool editorRunning() {
     return found;
 }
 
-// Vrai si la couche OpenXR tourne dans un jeu (elle ecrit layer_alive toutes les ~1,5 s) et a l'editeur en jeu active.
-bool gameWithLayerRunning() {
-    if (!g_cfg.inGameEditor) return false;
-    WIN32_FILE_ATTRIBUTE_DATA attr;
-    const std::wstring path = (ovz::dataDir() / "layer_alive").wstring();
-    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attr)) return false;
-    FILETIME nowFt;
-    GetSystemTimeAsFileTime(&nowFt);
-    ULARGE_INTEGER a, b;
-    a.LowPart = nowFt.dwLowDateTime;
-    a.HighPart = nowFt.dwHighDateTime;
-    b.LowPart = attr.ftLastWriteTime.dwLowDateTime;
-    b.HighPart = attr.ftLastWriteTime.dwHighDateTime;
-    return a.QuadPart > b.QuadPart && (a.QuadPart - b.QuadPart) < 5ull * 10000000ull;  // moins de 5 s
-}
-
-// Dans un jeu, l'editeur separe ferme le jeu (une seule application VR a la fois) : on bascule l'editeur de la couche.
 void launchEditor() {
-    if (gameWithLayerRunning()) {
-        std::error_code ec;
-        std::ofstream(ovz::dataDir() / "edit.toggle") << "1";
-        return;
-    }
     if (editorRunning()) return;  // deja lance : un seul gestionnaire a la fois
     const std::wstring exe = g_exeDir + L"\\OverlayVR_Editor.exe";
     if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, g_exeDir.c_str(), SW_SHOW)) <= 32)
@@ -265,7 +240,7 @@ void pollEditorTriggers() {
     if (pressed && !g_editorKeyDown) trigger = true;
     g_editorKeyDown = pressed;
     if (g_joy.pressed(g_hwnd, g_cfg.editorJoystickButton, g_cfg.editorJoystick)) trigger = true;
-    if (trigger && (gameWithLayerRunning() || !editorRunning())) {
+    if (trigger && !editorRunning()) {
         MessageBeep(MB_OK);
         launchEditor();
     }
@@ -374,42 +349,6 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
-// Petit serveur HTTP local (127.0.0.1:47321) pour le bouton de la barre d'outils de MSFS : toute requete ouvre / ferme
-// l'editeur en jeu (fichier edit.toggle lu par la couche). Il n'ecoute que la boucle locale.
-DWORD WINAPI httpThread(LPVOID) {
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return 0;
-    SOCKET ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (ls == INVALID_SOCKET) return 0;
-    sockaddr_in addr = {};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(47321);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(ls, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0 || listen(ls, 4) != 0) {
-        closesocket(ls);
-        return 0;
-    }
-    for (;;) {
-        SOCKET c = accept(ls, nullptr, nullptr);
-        if (c == INVALID_SOCKET) break;
-        char buf[512] = {};
-        recv(c, buf, sizeof buf - 1, 0);
-        const bool toggle = std::strstr(buf, "GET /toggle") != nullptr;
-        if (toggle) {
-            if (gameWithLayerRunning()) std::ofstream(ovz::dataDir() / "edit.toggle") << "1";
-        }
-        const char* body = toggle ? (gameWithLayerRunning() ? "ok" : "no-game") : "OverlayVR";
-        char resp[256];
-        std::snprintf(resp, sizeof resp,
-                      "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-                      static_cast<int>(std::strlen(body)), body);
-        send(c, resp, static_cast<int>(std::strlen(resp)), 0);
-        closesocket(c);
-    }
-    closesocket(ls);
-    return 0;
-}
-
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     HANDLE once = CreateMutexW(nullptr, TRUE, L"Local\\OverlayVR_Tray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;  // deja lance : l'icone est la
@@ -432,7 +371,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     RegisterClassW(&wc);
     g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"OverlayVR", 0, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
     ovz::ensureConfigFile();
-    CloseHandle(CreateThread(nullptr, 0, httpThread, nullptr, 0, nullptr));
     updateIcon(true);
     SetTimer(g_hwnd, kTimer, 1500, nullptr);
     SetTimer(g_hwnd, kPollTimer, 40, nullptr);
