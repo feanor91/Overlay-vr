@@ -222,6 +222,7 @@ private:
     // Mesure de performance : images par seconde, temps de calcul de l'editeur (CPU) par image, pire image.
     float perfAcc_ = 0, perfWork_ = 0, perfWorst_ = 0, perfFps_ = 0, perfAvgMs_ = 0, perfWorstMs_ = 0;
     int perfFrames_ = 0, perfReports_ = 0;
+    float perfWaitFrame_ = 0, perfWaitImage_ = 0, perfEnd_ = 0;  // temps cumules d'attente (s) : xrWaitFrame, xrWaitSwapchainImage, xrEndFrame
     float periodMs_ = 0;  // periode d'affichage annoncee par le runtime (xrWaitFrame) : 11 ms = 90 Hz, 33 ms = 30 Hz
 
     XrPath path(const char* s) {
@@ -1222,7 +1223,9 @@ private:
 
     void frame() {
         XrFrameState fs = {XR_TYPE_FRAME_STATE};
+        const auto tWait0 = std::chrono::steady_clock::now();
         CHK(xrWaitFrame(session_, nullptr, &fs));
+        perfWaitFrame_ += std::chrono::duration<float>(std::chrono::steady_clock::now() - tWait0).count();
         CHK(xrBeginFrame(session_, nullptr));
         periodMs_ = static_cast<float>(fs.predictedDisplayPeriod) / 1.0e6f;
 
@@ -1266,7 +1269,9 @@ private:
                 CHK(xrAcquireSwapchainImage(e.handle, nullptr, &idx));
                 XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
                 wi.timeout = XR_INFINITE_DURATION;
+                const auto tImg0 = std::chrono::steady_clock::now();
                 CHK(xrWaitSwapchainImage(e.handle, &wi));
+                perfWaitImage_ += std::chrono::duration<float>(std::chrono::steady_clock::now() - tImg0).count();
                 // Profondeur : image du swapchain de profondeur si disponible, sinon tampon prive.
                 bool haveDepth = false;
                 uint32_t didx = 0;
@@ -1290,6 +1295,7 @@ private:
                 ctx_->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
                 rend_.begin();
                 drawScene();
+                ctx_->Flush();  // D3D11 : sans cela les commandes peuvent rester dans le pilote et le runtime attend le GPU
 
                 CHK(xrReleaseSwapchainImage(e.handle, nullptr));
                 projViews[i].pose = pp;
@@ -1323,8 +1329,11 @@ private:
             perfAvgMs_ = perfWork_ / perfFrames_ * 1000.0f;
             perfWorstMs_ = perfWorst_ * 1000.0f;
             if (++perfReports_ % 5 == 0)
-                std::printf("Performances : %.0f images/s, calcul %.1f ms par image (pire %.0f ms), rythme du runtime : %.1f ms (%.0f Hz)\n", perfFps_,
-                            perfAvgMs_, perfWorstMs_, periodMs_, periodMs_ > 0 ? 1000.0f / periodMs_ : 0.0f);
+                std::printf("Performances : %.0f images/s, calcul %.1f ms par image (pire %.0f ms), rythme du runtime : %.1f ms (%.0f Hz)\n"
+                            "   attentes par image : xrWaitFrame %.1f ms, xrWaitSwapchainImage %.1f ms, xrEndFrame %.1f ms\n",
+                            perfFps_, perfAvgMs_, perfWorstMs_, periodMs_, periodMs_ > 0 ? 1000.0f / periodMs_ : 0.0f,
+                            perfWaitFrame_ / perfFrames_ * 1000.0f, perfWaitImage_ / perfFrames_ * 1000.0f, perfEnd_ / perfFrames_ * 1000.0f);
+            perfWaitFrame_ = perfWaitImage_ = perfEnd_ = 0;
             perfAcc_ = perfWork_ = perfWorst_ = 0;
             perfFrames_ = 0;
         }
@@ -1334,7 +1343,9 @@ private:
         ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
         ei.layerCount = layerCount;
         ei.layers = layers;
+        const auto tEnd0 = std::chrono::steady_clock::now();
         CHK(xrEndFrame(session_, &ei));
+        perfEnd_ += std::chrono::duration<float>(std::chrono::steady_clock::now() - tEnd0).count();
     }
 };
 
