@@ -206,7 +206,7 @@ private:
     V3 hudPos_;
     float hudYaw_ = 0;
     bool hudPlaced_ = false, headValid_ = false, surfaceDirty_ = false;
-    TextPanel help_, status_;
+    TextPanel help_, status_, namePanel_;  // namePanel_ : invite de nom, devant toi, juste apres le trace d'une zone
     std::chrono::steady_clock::time_point lastFrame_ = std::chrono::steady_clock::now();
     Q headRot_;
     V3 headPos_;
@@ -264,6 +264,7 @@ private:
         rend_.init(dev_, ctx_);
         help_.init(dev_, ctx_, 820, 500);
         status_.init(dev_, ctx_, 820, 130);
+        namePanel_.init(dev_, ctx_, 820, 140);
     }
 
     XrAction makeAction(const char* name, XrActionType type, bool bothHands) {
@@ -769,6 +770,7 @@ private:
         namingBuf_.clear();
         namingTyped_ = false;
         namingStart_ = GetTickCount64();
+        MessageBeep(MB_ICONASTERISK);  // signal sonore : la zone est creee, le nom peut etre saisi
         for (int vk = 0; vk < 256; vk++) keyPrev_[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0;
     }
 
@@ -1062,6 +1064,11 @@ private:
             hint = namingTyped_ ? L"Nom : " + namingBuf_ + L"_     (Entrée valide, " + keep + L")"
                                 : L"Zone créée : tape son nom au clavier puis Entrée (" + keep + L")";
         }
+        if (namingIdx_ >= 0) {  // invite bien visible : le panneau d'etat est trop haut pour etre lu en regardant le bureau
+            namePanel_.setLines({L"#NOM DE LA ZONE",
+                                 L"Tape son nom sur le clavier du PC, puis Entrée   (Échap : garder « " + widen(namingOrig_) + L" »)",
+                                 namingTyped_ ? L"> " + namingBuf_ + L"_" : L"> (nom par défaut : " + widen(namingOrig_) + L")"});
+        }
         char buf[160];
         std::snprintf(buf, sizeof buf, "%d zone(s)  |  bureau à %.2f m  |  %.0f img/s, calcul %.1f ms (pire %.0f)", static_cast<int>(zones_.size()),
                       surfaceY_, perfFps_, perfAvgMs_, perfWorstMs_);
@@ -1142,9 +1149,12 @@ private:
         // Panneaux de texte fixes dans la piece (ils ne suivent pas la tete), l'etat au-dessus de l'aide.
         rend_.beginPanels();
         const Mat4 hud = ovm::mFromPose(hudPos_, ovm::qaxis('y', hudYaw_));
+        const Mat4 head = ovm::mFromPose(headPos_, headRot_);
         const float w = 0.65f;
         rend_.panel(ovm::mmul(hud, ovm::mmul(ovm::mTranslate({0, showHelp_ ? 0.26f : 0.0f, 0}), ovm::mScale({w, w * 130 / 820, 1}))), status_.srv());
         if (showHelp_) rend_.panel(ovm::mmul(hud, ovm::mScale({w, w * 500 / 820, 1})), help_.srv());
+        if (namingIdx_ >= 0)  // invite de nom : collee a la tete, devant et un peu en dessous du regard
+            rend_.panel(ovm::mmul(head, ovm::mmul(ovm::mTranslate({0, -0.12f, -0.75f}), ovm::mScale({0.5f, 0.5f * 140 / 820, 1}))), namePanel_.srv());
     }
 
     void frame() {

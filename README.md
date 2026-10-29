@@ -141,7 +141,8 @@ une ou plusieurs zones (Ctrl / Maj), choisis le jeu (ou « Tous les jeux ») et 
 dans `zones.json` et pris en compte en jeu. Le même onglet permet d'ajouter, renommer ou supprimer un jeu (nom + exécutables).
 Ferme l'éditeur du casque avant d'affecter, sinon il peut réécrire `zones.json`.
 
-**Nommer les zones** : à la création, dès qu'une zone est tracée dans le casque, le panneau demande son nom : tape-le sur le
+**Nommer les zones** : à la création, dès qu'une zone est tracée dans le casque, un **bip** retentit et un panneau « NOM DE LA ZONE »
+apparaît **devant toi** (collé au regard, un peu en dessous) : tape le nom sur le
 clavier du PC puis **Entrée** (Retour arrière corrige, **Échap** garde le nom par défaut `plan1`, `volume2`…). Sans rien taper,
 la proposition disparaît au bout de 20 s. Après coup, sélectionne la zone dans l'onglet *Zones et jeux*, change son nom et clique
 **Renommer**. Les noms sont uniques (un doublon reçoit un numéro dans l'éditeur, est refusé dans la fenêtre).
@@ -234,5 +235,6 @@ Si les zones « nagent » quand tu bouges la tête ou si les FPS baissent :
 
 Un calcul de quelques millisecondes ou moins est normal. Le retard visible quand la tête bouge vite vient surtout de la diffusion par
 Virtual Desktop : le passthrough est en temps réel dans le casque, alors que l'image virtuelle arrive avec quelques dizaines de
-millisecondes de retard (VD corrige la rotation de la tête, pas le déplacement). Pour savoir si une version a changé quelque chose,
+millisecondes de retard (VD corrige la rotation de la tête, pas le déplacement). C'est surtout visible **dans l'éditeur** (une image
+calculée par le programme) ; en jeu, les zones sont des couches que le runtime recale lui-même à la bonne position. Pour savoir si une version a changé quelque chose,
 installe une ancienne version depuis la page Releases et compare.
