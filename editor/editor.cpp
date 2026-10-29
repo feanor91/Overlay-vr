@@ -140,6 +140,13 @@ private:
     Renderer rend_;
     bool running_ = false, quit_ = false;
     bool depthExt_ = false;      // extension de profondeur disponible
+    // Cadence : le runtime impose 30 Hz a l'editeur ; on demande la plus haute (XR_FB_display_refresh_rate) si possible.
+    bool refreshExt_ = false;
+    float refreshWanted_ = 0;  // editor.json : "refresh_hz" (0 : la plus haute proposee)
+    float scale_ = 1.0f;       // editor.json : "scale" (resolution de rendu relative a la recommandee)
+    PFN_xrEnumerateDisplayRefreshRatesFB enumRates_ = nullptr;
+    PFN_xrGetDisplayRefreshRateFB getRate_ = nullptr;
+    PFN_xrRequestDisplayRefreshRateFB requestRate_ = nullptr;
     bool depthWanted_ = true;    // editor.json : "depth": false pour la couper
     DXGI_FORMAT depthFormat_ = DXGI_FORMAT_UNKNOWN;
     DXGI_FORMAT colorFormat_ = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -239,6 +246,9 @@ private:
         xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, props.data());
         for (const auto& p : props)
             if (std::strcmp(p.extensionName, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME) == 0) depthExt_ = true;
+        for (const auto& p : props)
+            if (std::strcmp(p.extensionName, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME) == 0) refreshExt_ = true;
+        if (refreshExt_) ext.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
         if (depthExt_ && depthWanted_) ext.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
         else depthExt_ = false;
         XrInstanceCreateInfo ci = {XR_TYPE_INSTANCE_CREATE_INFO};
@@ -321,6 +331,12 @@ private:
         }
         rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
         CHK(xrCreateReferenceSpace(session_, &rs, &view_));
+
+        if (refreshExt_) {
+            xrGetInstanceProcAddr(instance_, "xrEnumerateDisplayRefreshRatesFB", reinterpret_cast<PFN_xrVoidFunction*>(&enumRates_));
+            xrGetInstanceProcAddr(instance_, "xrGetDisplayRefreshRateFB", reinterpret_cast<PFN_xrVoidFunction*>(&getRate_));
+            xrGetInstanceProcAddr(instance_, "xrRequestDisplayRefreshRateFB", reinterpret_cast<PFN_xrVoidFunction*>(&requestRate_));
+        }
 
         // Actions
         XrActionSetCreateInfo asi = {XR_TYPE_ACTION_SET_CREATE_INFO};
@@ -409,8 +425,10 @@ private:
         eyes_.resize(n);
         for (uint32_t i = 0; i < n; i++) {
             EyeSwapchain& e = eyes_[i];
-            e.width = static_cast<int32_t>(viewConfigs_[i].recommendedImageRectWidth);
-            e.height = static_cast<int32_t>(viewConfigs_[i].recommendedImageRectHeight);
+            e.width = std::max(256, static_cast<int32_t>(viewConfigs_[i].recommendedImageRectWidth * scale_) & ~1);
+            e.height = std::max(256, static_cast<int32_t>(viewConfigs_[i].recommendedImageRectHeight * scale_) & ~1);
+            if (i == 0) std::printf("Resolution de rendu par oeil : %d x %d (recommandee %u x %u, echelle %.2f)\n", e.width, e.height,
+                                    viewConfigs_[i].recommendedImageRectWidth, viewConfigs_[i].recommendedImageRectHeight, scale_);
             XrSwapchainCreateInfo sc = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
             sc.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
             sc.format = chosen;
@@ -478,23 +496,52 @@ private:
                              : "Profondeur non transmise (extension ou format indisponible, ou desactivee dans editor.json)\n");
     }
 
+    // Demande au runtime la cadence la plus haute (ou editor.json "refresh_hz") : il impose 30 Hz a l'editeur par defaut.
+    void tuneRefreshRate() {
+        if (!refreshExt_ || !enumRates_ || !requestRate_) {
+            std::printf("Cadence : extension XR_FB_display_refresh_rate indisponible, le runtime choisit seul\n");
+            return;
+        }
+        uint32_t n = 0;
+        enumRates_(session_, 0, &n, nullptr);
+        std::vector<float> rates(n);
+        if (n) enumRates_(session_, n, &n, rates.data());
+        float cur = 0;
+        if (getRate_) getRate_(session_, &cur);
+        std::printf("Cadences proposees par le runtime :");
+        for (float r : rates) std::printf(" %.0f", r);
+        std::printf(" Hz ; actuelle : %.0f Hz\n", cur);
+        if (rates.empty()) return;
+        const float want = refreshWanted_ > 0 ? refreshWanted_ : *std::max_element(rates.begin(), rates.end());
+        if (want != cur) {
+            const XrResult r = requestRate_(session_, want);
+            std::printf("Demande de %.0f Hz : %s (code %d)\n", want, XR_SUCCEEDED(r) ? "acceptee" : "refusee", static_cast<int>(r));
+        }
+    }
+
     void pollEvents() {
         XrEventDataBuffer ev = {XR_TYPE_EVENT_DATA_BUFFER};
         while (xrPollEvent(instance_, &ev) == XR_SUCCESS) {
             if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
                 auto* s = reinterpret_cast<XrEventDataSessionStateChanged*>(&ev);
+                static const char* const names[] = {"inconnu", "IDLE", "READY", "SYNCHRONIZED", "VISIBLE", "FOCUSED", "STOPPING", "LOSS_PENDING", "EXITING"};
+                std::printf("Etat de la session : %s\n", s->state < 9 ? names[s->state] : "?");
                 if (s->state == XR_SESSION_STATE_READY) {
                     XrSessionBeginInfo bi = {XR_TYPE_SESSION_BEGIN_INFO};
                     bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
                     CHK(xrBeginSession(session_, &bi));
                     running_ = true;
                     std::printf("Session demarree. Mode : VOLUME\n");
+                    tuneRefreshRate();
                 } else if (s->state == XR_SESSION_STATE_STOPPING) {
                     xrEndSession(session_);
                     running_ = false;
                 } else if (s->state == XR_SESSION_STATE_EXITING || s->state == XR_SESSION_STATE_LOSS_PENDING) {
                     quit_ = true;
                 }
+            } else if (ev.type == XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB) {
+                auto* r = reinterpret_cast<XrEventDataDisplayRefreshRateChangedFB*>(&ev);
+                std::printf("Cadence d'affichage : %.0f Hz -> %.0f Hz\n", r->fromDisplayRefreshRate, r->toDisplayRefreshRate);
             } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
                 quit_ = true;
             }
@@ -591,13 +638,15 @@ private:
             const auto j = nlohmann::json::parse(f);
             surfaceY_ = j.value("surface_y", surfaceY_);
             depthWanted_ = j.value("depth", depthWanted_);
+            refreshWanted_ = j.value("refresh_hz", refreshWanted_);
+            scale_ = std::clamp(j.value("scale", scale_), 0.25f, 1.5f);
         } catch (...) {
         }
     }
     void saveSettings() {
         std::error_code ec;
         std::filesystem::create_directories(ovz::dataDir(), ec);
-        std::ofstream(ovz::dataDir() / "editor.json") << nlohmann::json{{"surface_y", surfaceY_}, {"depth", depthWanted_}}.dump(2);
+        std::ofstream(ovz::dataDir() / "editor.json") << nlohmann::json{{"surface_y", surfaceY_}, {"depth", depthWanted_}, {"refresh_hz", refreshWanted_}, {"scale", scale_}}.dump(2);
     }
 
     // --- visee ---------------------------------------------------------------------------------------

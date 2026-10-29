@@ -214,6 +214,12 @@ l'éditeur indique au démarrage « Profondeur transmise au runtime » ou « Pro
 s'en sert : compare avant/après. Pour la couper (si l'éditeur plante ou se comporte moins bien), crée ou modifie
 `%APPDATA%\OverlayVR\editor.json` avec `{ "depth": false }`.
 
+**Cadence de l'éditeur (30 Hz)** : sur certaines installations Virtual Desktop impose 30 Hz à l'éditeur même si le casque est à 90 ou
+120 Hz (la console affiche « rythme du runtime : 33.3 ms (30 Hz) »), ce qui fait « nager » les traits quand la tête bouge. L'éditeur
+demande maintenant au runtime la cadence la plus haute qu'il propose (extension `XR_FB_display_refresh_rate`) ; la console affiche les
+cadences proposées et la réponse. Réglages de `%APPDATA%\OverlayVR\editor.json` : `"refresh_hz": 0` (0 = la plus haute, ou une valeur
+comme `90`), `"scale": 1.0` (résolution de rendu par rapport à la recommandée ; essaie `0.6` si la cadence reste basse).
+
 ## Limites et points à valider casque sur la tête
 
 Ce code n'a **pas encore été testé avec un casque** : il compile, la logique mathématique est vérifiée, le reste est à valider.
