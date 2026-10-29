@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -30,6 +31,34 @@ struct Zone {
     std::vector<std::array<float, 2>> pts;
 };
 
+// Ancre : pose de la tete (position + cap) dans le repere des zones, relevee quand elles etaient bien alignees avec la
+// realite. A chaque session le repere STAGE du runtime peut avoir bouge (recentrage Meta...) ; en s'asseyant au meme endroit
+// on compare la tete d'aujourd'hui a l'ancre et on deplace toutes les zones d'un bloc (rotation + translation sur le plan
+// horizontal, la hauteur ne change pas).
+struct Anchor {
+    bool valid = false;
+    float pos[3] = {0, 0, 0};
+    float yaw = 0;
+};
+
+// Cap d'une direction de visee (meme convention que `yaw` des zones). Faux si on regarde trop haut/bas.
+inline bool headingFromForward(float fx, float fz, float& yaw) {
+    if (fx * fx + fz * fz < 0.25f) return false;
+    yaw = std::atan2(-fx, -fz);
+    return true;
+}
+
+// Deplace les zones comme le fait passer l'ancre `from` a la pose de tete (toPos, toYaw).
+inline void rigidMove(std::vector<Zone>& zones, const Anchor& from, const float toPos[3], float toYaw) {
+    const float a = toYaw - from.yaw, c = std::cos(a), s = std::sin(a);
+    for (Zone& z : zones) {
+        const float dx = z.pos[0] - from.pos[0], dz = z.pos[2] - from.pos[2];
+        z.pos[0] = toPos[0] + dx * c + dz * s;
+        z.pos[2] = toPos[2] - dx * s + dz * c;
+        z.yaw += a;
+    }
+}
+
 inline std::filesystem::path dataDir() {
     const char* appdata = std::getenv("APPDATA");
     std::filesystem::path base = appdata ? appdata : ".";
@@ -38,7 +67,7 @@ inline std::filesystem::path dataDir() {
 
 inline std::filesystem::path zonesPath() { return dataDir() / "zones.json"; }
 
-inline bool loadZones(const std::filesystem::path& path, std::vector<Zone>& out) {
+inline bool loadZones(const std::filesystem::path& path, std::vector<Zone>& out, Anchor* anchor = nullptr) {
     std::ifstream f(path);
     if (!f) return false;
     try {
@@ -66,13 +95,22 @@ inline bool loadZones(const std::filesystem::path& path, std::vector<Zone>& out)
             zones.push_back(z);
         }
         out = std::move(zones);
+        if (anchor) {
+            *anchor = Anchor();
+            if (j.contains("anchor")) {
+                auto& a = j["anchor"];
+                for (int i = 0; i < 3; i++) anchor->pos[i] = a.at("pos").at(i).get<float>();
+                anchor->yaw = a.value("yaw", 0.0f);
+                anchor->valid = true;
+            }
+        }
         return true;
     } catch (...) {
         return false;  // fichier en cours d'ecriture ou invalide : on garde l'ancien contenu
     }
 }
 
-inline bool saveZones(const std::filesystem::path& path, const std::vector<Zone>& zones) {
+inline bool saveZones(const std::filesystem::path& path, const std::vector<Zone>& zones, const Anchor* anchor = nullptr) {
     nlohmann::json arr = nlohmann::json::array();
     for (auto& z : zones) {
         nlohmann::json e = {{"name", z.name},
@@ -91,6 +129,7 @@ inline bool saveZones(const std::filesystem::path& path, const std::vector<Zone>
         arr.push_back(e);
     }
     nlohmann::json root = {{"version", 1}, {"space", "stage"}, {"zones", arr}};
+    if (anchor && anchor->valid) root["anchor"] = {{"pos", {anchor->pos[0], anchor->pos[1], anchor->pos[2]}}, {"yaw", anchor->yaw}};
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     auto tmp = path;

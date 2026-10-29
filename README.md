@@ -103,6 +103,21 @@ légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :
 Le décalage est **propre à chaque jeu** (profil) : recaler MSFS ne touche pas Assetto Corsa. Il est enregistré dans `settings.json`
 (champs `offset` / `offset_yaw_deg` du profil) quelques instants après avoir relâché les touches. `"hotkeys": false` désactive ces raccourcis.
 
+## Recalage automatique sur ta position (ancre de siège)
+
+Le repère de Virtual Desktop bouge d'une session à l'autre (et à chaque recentrage avec le bouton Meta), donc les zones
+paraissent décalées. Comme tu t'assieds toujours au même endroit, on s'en sert :
+
+1. **Une fois**, zones bien alignées, assis, regard droit devant : dans l'éditeur, **maintiens le clic du stick gauche
+   1,5 s** (bip aigu). La position et le cap de ta tête sont mémorisés avec les zones (« ancre »). Elle est aussi
+   mémorisée toute seule à la première zone dessinée. Pour la redéfinir : même geste en tenant aussi le clic du stick droit.
+2. **À chaque session**, assis, regard droit devant : **même geste dans l'éditeur** (les zones sont déplacées d'un bloc et
+   enregistrées), ou **en jeu : Ctrl+Alt+C** (recalage valable jusqu'à la fermeture du jeu ; les réglages
+   Ctrl+Alt+flèches s'ajoutent ensuite si besoin).
+
+Le recalage corrige position et orientation sur le plan horizontal (pas la hauteur). Précision = la régularité avec
+laquelle tu poses la tête (quelques cm) ; pour affiner, utilise les touches Ctrl+Alt+flèches.
+
 ## Activer / désactiver les zones en jeu (touche ou bouton de HOTAS)
 
 Comme le clic gauche sur l'icône de la barre d'état, mais sans quitter le casque : une touche du clavier et/ou un bouton de ton

@@ -105,7 +105,7 @@ class Editor {
 public:
     void run() {
         SetEnvironmentVariableA("OVERLAYVR_DISABLE", "1");  // la couche globale ne doit pas s'ajouter ici
-        ovz::loadZones(ovz::zonesPath(), zones_);
+        ovz::loadZones(ovz::zonesPath(), zones_, &seat_);
         loadSettings();
         ovz::ensureConfigFile();
         loadProfiles();
@@ -216,6 +216,9 @@ private:
         std::vector<Saved> items;
     } grab_;
 
+    ovz::Anchor seat_;
+    float thumbHold_ = 0;
+    bool thumbDone_ = false;
     bool showHelp_ = true;
     V3 hudPos_;
     float hudYaw_ = 0;
@@ -611,7 +614,47 @@ private:
     bool otherProfile(const Zone& z) const { return curProfile_ > 0 && !z.profile.empty() && z.profile != activeProfile(); }
 
     // --- donnees : enregistrement, historique, reglages ---------------------------------------------
-    void save() { ovz::saveZones(ovz::zonesPath(), zones_); }
+    void save() {
+        if (!seat_.valid && headValid_ && !zones_.empty()) setAnchorHere();  // premiere zone : la tete d'aujourd'hui sert d'ancre
+        ovz::saveZones(ovz::zonesPath(), zones_, &seat_);
+    }
+
+    bool setAnchorHere() {
+        float yaw;
+        const V3 f = ovm::qrot(headRot_, V3{0, 0, -1});
+        if (!headValid_ || !ovz::headingFromForward(f.x, f.z, yaw)) return false;
+        seat_.valid = true;
+        seat_.pos[0] = headPos_.x;
+        seat_.pos[1] = headPos_.y;
+        seat_.pos[2] = headPos_.z;
+        seat_.yaw = yaw;
+        return true;
+    }
+
+    // Maintien du clic du stick gauche : sans ancre, memorise la tete comme ancre (zones deja bien alignees) ; avec ancre,
+    // deplace toutes les zones pour que l'ancre retombe sur la tete actuelle. Stick droit en plus du maintien : redefinit l'ancre.
+    void recalibrate() {
+        float yaw;
+        const V3 f = ovm::qrot(headRot_, V3{0, 0, -1});
+        if (!headValid_ || !ovz::headingFromForward(f.x, f.z, yaw)) {
+            std::printf("Recalage impossible : regarde droit devant toi\n");
+            Beep(400, 200);
+            return;
+        }
+        pushHistory();
+        if (!seat_.valid || in_.thumbR.now) {
+            setAnchorHere();
+            std::printf("Ancre definie ici (position de la tete). Au prochain lancement, maintiens le clic du stick gauche pour recaler.\n");
+        } else {
+            const float to[3] = {headPos_.x, headPos_.y, headPos_.z};
+            std::printf("Zones recalees : %.2f m / %.2f m, %.1f deg\n", to[0] - seat_.pos[0], to[2] - seat_.pos[2],
+                        (yaw - seat_.yaw) * 180.0f / ovm::kPi);
+            ovz::rigidMove(zones_, seat_, to, yaw);
+            setAnchorHere();
+        }
+        ovz::saveZones(ovz::zonesPath(), zones_, &seat_);
+        Beep(1200, 120);
+    }
 
     void pushHistory() {
         history_.push_back(zones_);
@@ -1058,9 +1101,20 @@ private:
             placeHud();
             hudPlaced_ = true;
         }
-        if (in_.thumbL.down()) {
-            showHelp_ = !showHelp_;
-            if (showHelp_) placeHud();  // reapparait devant toi
+        if (in_.thumbL.now) {
+            thumbHold_ += dt;
+            if (!thumbDone_ && thumbHold_ >= 1.5f) {
+                thumbDone_ = true;
+                recalibrate();
+            }
+        }
+        if (in_.thumbL.up()) {  // clic court : aide ; maintien : recalage (traite ci-dessus)
+            if (!thumbDone_) {
+                showHelp_ = !showHelp_;
+                if (showHelp_) placeHud();  // reapparait devant toi
+            }
+            thumbHold_ = 0;
+            thumbDone_ = false;
         }
         if (phase_ == Phase::Idle && !grab_.active) {  // stick droit haut/bas : monte/descend le plan de visee
             float sx, sy;
@@ -1209,6 +1263,8 @@ private:
             L"Grip tenu dans le vide : déplacer TOUTES les zones (recalage) ;",
             L"     stick droit pendant ce geste : ◄► tourne fin, ▲▼ avance/recule",
             L"Clic stick : masquer / replacer l'aide devant toi         Menu : quitter",
+            L"Clic stick MAINTENU 1,5 s (assis, regard droit devant) : RECALER les zones",
+            L"     (1re fois = memorise l'ancre ; + clic stick droit = redefinir l'ancre)",
         });
     }
 

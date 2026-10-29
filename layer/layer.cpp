@@ -147,6 +147,11 @@ struct State {
     double perfSumMs = 0, perfWorstMs = 0;  // temps passe par la couche a chaque image (hors appel au runtime)
     unsigned perfFrames = 0;
     ULONGLONG perfLogged = 0;
+    ovz::Anchor anchor;       // ancre des zones (zones.json) et recalage de la session courante sur la tete
+    bool sessionValid = false;
+    float sessionPos[3] = {0, 0, 0};
+    float sessionYaw = 0;
+    bool recalKeyWasDown = false;
     int profileIdx = -1;      // profil du jeu courant (-1 : jeu sans profil)
     std::unordered_map<std::string, bool> gazeShown;  // hysteresis : zone actuellement affichee ou non
     bool active = true;  // reglages utilisateur : la couche dessine-t-elle dans ce jeu ?
@@ -173,6 +178,7 @@ float& contextYaw() { return g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].of
 // garde celles sans jeu et celles du profil courant.
 void rebuildShown() {
     std::vector<ovz::Zone> all = g.zones;
+    if (g.anchor.valid && g.sessionValid) ovz::rigidMove(all, g.anchor, g.sessionPos, g.sessionYaw);
     ovz::applyOffset(all, contextOffset(), contextYaw());
     g.shown.clear();
     const std::string& mine = g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].name : std::string();
@@ -197,6 +203,10 @@ void refreshConfig() {
     g.active = now;
 }
 
+bool sameAnchor(const ovz::Anchor& a, const ovz::Anchor& b) {
+    return a.valid == b.valid && a.yaw == b.yaw && a.pos[0] == b.pos[0] && a.pos[1] == b.pos[1] && a.pos[2] == b.pos[2];
+}
+
 void refreshZones() {
     ULONGLONG now = GetTickCount64();
     if (now - g.lastCheck < 500) return;
@@ -213,7 +223,10 @@ void refreshZones() {
     }
     if (CompareFileTime(&attr.ftLastWriteTime, &g.zonesStamp) == 0) return;
     g.zonesStamp = attr.ftLastWriteTime;
-    if (ovz::loadZones(path, g.zones)) {
+    ovz::Anchor a;
+    if (ovz::loadZones(path, g.zones, &a)) {
+        if (!a.valid || !g.anchor.valid || !sameAnchor(a, g.anchor)) g.sessionValid = false;  // zones rewritten : recalage obsolete
+        g.anchor = a;
         rebuildShown();
         logf("%zu zone(s) chargee(s)", g.zones.size());
     }
@@ -548,12 +561,31 @@ bool inGaze(const ovz::Zone& z, V3 head, V3 fwd) {
 // Recalage en jeu, au clavier : Ctrl+Alt + fleches (avancer/reculer/gauche/droite selon la direction de la tete),
 // PageHaut/PageBas (hauteur), Inser/Suppr (rotation), Origine (remise a zero). Maj = pas plus grands.
 // Le decalage est enregistre dans settings.json une fois les touches relachees.
-void updateHotkeys(V3 fwd) {
+void updateHotkeys(V3 head, V3 fwd) {
     const ULONGLONG now = GetTickCount64();
     const float dt = g.lastTick ? std::min(0.1f, (now - g.lastTick) / 1000.0f) : 0.0f;
     g.lastTick = now;
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     bool changed = false;
+    const bool recal = down(VK_CONTROL) && down(VK_MENU) && down('C');
+    if (recal && !g.recalKeyWasDown) {  // Ctrl+Alt+C : recale toutes les zones sur la position actuelle de la tete
+        float yaw;
+        if (!g.anchor.valid) {
+            logf("recalage impossible : pas d'ancre (maintiens le clic du stick gauche dans l'editeur pour la definir)");
+        } else if (!ovz::headingFromForward(fwd.x, fwd.z, yaw)) {
+            logf("recalage impossible : regarde droit devant toi");
+        } else {
+            g.sessionPos[0] = head.x;
+            g.sessionPos[1] = head.y;
+            g.sessionPos[2] = head.z;
+            g.sessionYaw = yaw;
+            g.sessionValid = true;
+            changed = true;
+            logf("zones recalees sur la tete : decalage %.2f / %.2f m, %.1f deg", head.x - g.anchor.pos[0], head.z - g.anchor.pos[2],
+                 (yaw - g.anchor.yaw) * 180.0f / ovm::kPi);
+        }
+    }
+    g.recalKeyWasDown = recal;
     if (down(VK_CONTROL) && down(VK_MENU)) {
         const float move = (down(VK_SHIFT) ? 0.15f : 0.03f) * dt, turn = (down(VK_SHIFT) ? 15.0f : 3.0f) * dt;
         V3 f = {fwd.x, 0, fwd.z};
@@ -741,7 +773,7 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
         pitchDown = std::asin(std::clamp(-fy, -1.0f, 1.0f)) * 180.0f / ovm::kPi;
     }
 
-    if (g.cfg.hotkeys && haveHead) updateHotkeys(fwd);
+    if (g.cfg.hotkeys && haveHead) updateHotkeys(head, fwd);
 
     std::vector<XrCompositionLayerQuad> quads;
     quads.reserve(g.shown.size() * 3 + 8);
