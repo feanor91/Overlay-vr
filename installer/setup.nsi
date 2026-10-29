@@ -33,7 +33,15 @@ Section "Install"
   SetRegView 64
   nsExec::Exec 'taskkill /F /IM OverlayVR_Tray.exe'
   nsExec::Exec 'taskkill /F /IM OverlayVR_Config.exe'
+  nsExec::Exec 'taskkill /F /IM OverlayVR_Editor.exe'
   SetOutPath "$INSTDIR"
+  ; La couche est chargee par tout programme OpenXR ouvert (MSFS, editeur...) : Windows interdit alors de l'ecraser mais
+  ; permet de la renommer. On l'ecarte ; elle est supprimee des que possible (au redemarrage au plus tard).
+  IfFileExists "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.dll" 0 noOldLayer
+    Delete "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.old"
+    Rename "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.dll" "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.old"
+    Delete /REBOOTOK "$INSTDIR\XR_APILAYER_OVERLAYVR_zones.old"
+  noOldLayer:
   File "..\dist\XR_APILAYER_OVERLAYVR_zones.dll"
   File "..\dist\XR_APILAYER_OVERLAYVR_zones.json"
   File "..\dist\OverlayVR_Editor.exe"
