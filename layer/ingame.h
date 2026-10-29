@@ -436,7 +436,8 @@ void addSegment(std::vector<XrCompositionLayerQuad>& out, V3 head, V3 a, V3 b, f
     out.push_back(q);
 }
 
-void addZoneWire(std::vector<XrCompositionLayerQuad>& out, V3 head, const ovz::Zone& z, float thick, Col col, size_t cap) {
+// `full` : 12 aretes ; sinon le seul contour du haut (4 couches de moins par zone : les couches de composition coutent des fps).
+void addZoneWire(std::vector<XrCompositionLayerQuad>& out, V3 head, const ovz::Zone& z, float thick, Col col, size_t cap, bool full = true) {
     const Q yaw = ovm::qaxis('y', z.yaw);
     const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
     auto P = [&](float x, float y, float zz) { return c + ovm::qrot(yaw, V3{x, y, zz}); };
@@ -455,7 +456,7 @@ void addZoneWire(std::vector<XrCompositionLayerQuad>& out, V3 head, const ovz::Z
     const std::vector<V3> top = ring(hy), bot = ring(-hy);
     if (z.type == ovz::ZoneType::Poly && top.size() > 10) return;
     for (size_t i = 0; i < top.size() && out.size() < cap; i++) addSegment(out, head, top[i], top[(i + 1) % top.size()], thick, col);
-    if (plane) return;
+    if (plane || !full) return;
     for (size_t i = 0; i < bot.size() && out.size() < cap; i++) addSegment(out, head, bot[i], bot[(i + 1) % bot.size()], thick, col);
     for (size_t i = 0; i < top.size() && out.size() < cap; i++) addSegment(out, head, top[i], bot[i], thick, col);
 }
@@ -642,7 +643,7 @@ void editFrame(XrTime displayTime, V3 head, std::vector<XrCompositionLayerQuad>&
         logf("editeur en jeu : manettes suivies G%d D%d, point vise %d, phase %d, %zu zone(s), tete (%.2f %.2f %.2f)", ed.tracked[0], ed.tracked[1],
              ed.hasHit, static_cast<int>(ed.ph), g.zones.size(), head.x, head.y, head.z);
     }
-    size_t cap = out.size() + 70;
+    size_t cap = out.size() + 34;  // plafond de traits : au-dela, les fps chutent et la tete semble figee
     for (int h = 0; h < 2; h++) {
         if (!ed.tracked[h]) continue;
         const float reach = h == 1 && ed.hasHit ? std::min(ovm::length(ed.hit - ed.rayO[1]), 3.0f) : 1.5f;
@@ -659,7 +660,7 @@ void editFrame(XrTime displayTime, V3 head, std::vector<XrCompositionLayerQuad>&
     if (ed.grab.active && ed.grab.idx < g.zones.size()) addZoneWire(out, head, g.zones[ed.grab.idx], 0.008f, kGreen, cap);
     for (size_t i = 0; i < g.zones.size(); i++) {
         if (static_cast<int>(i) == ed.hover || (ed.grab.active && i == ed.grab.idx)) continue;
-        addZoneWire(out, head, g.zones[i], 0.004f, otherProfileZone(g.zones[i]) ? kWhite : kCyan, cap);
+        addZoneWire(out, head, g.zones[i], 0.004f, otherProfileZone(g.zones[i]) ? kWhite : kCyan, cap, false);
     }
 }
 

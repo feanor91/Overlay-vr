@@ -999,6 +999,7 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     std::vector<XrCompositionLayerQuad> quads;
     quads.reserve(g.shown.size() * 3 + 8);
     for (const ovz::Zone& z : g.shown) {
+        if (ed.on) break;  // edition : seuls les traits de l'editeur sont ajoutes (chaque couche pese sur les fps)
         if (!z.enabled) continue;
         if (z.look > 0 && haveHead && pitchDown < z.look) continue;
         if (g.cfg.gazeOnly && !ed.on && haveHead && !inGaze(z, head, fwd)) continue;

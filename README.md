@@ -37,6 +37,12 @@ fois). L'éditeur est donc aussi intégré à la couche OpenXR, comme Open Kneeb
 - Désactivable : `"in_game_editor": false` dans `settings.json`. Le journal `layer.log` indique si les manettes ont pu être
   ajoutées au jeu (« editeur en jeu : entrees des manettes ajoutees »).
 
+### Bouton dans la barre d'outils de MSFS (essai)
+
+Le dossier `msfs-toolbar/overlayvr-panel` (dans le zip) est un paquet pour le dossier Community de MSFS 2024 : un panneau
+avec un bouton qui ouvre / ferme l'éditeur en jeu, via l'application de la barre d'état (serveur local `127.0.0.1:47321`).
+Non vérifié : voir `msfs-toolbar/LISEZ-MOI.txt`. Le raccourci clavier / HOTAS fait la même chose.
+
 ## Utilisation
 
 1. Dans le casque, lance `OverlayVR_Editor.exe` depuis le bureau Virtual Desktop. Le fond est du passthrough.

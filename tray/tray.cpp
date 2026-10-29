@@ -10,6 +10,7 @@
 #ifndef _UNICODE
 #define _UNICODE
 #endif
+#include <winsock2.h>
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <cwchar>
 #include <fstream>
 #include <string>
@@ -372,6 +374,42 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 }  // namespace
 
+// Petit serveur HTTP local (127.0.0.1:47321) pour le bouton de la barre d'outils de MSFS : toute requete ouvre / ferme
+// l'editeur en jeu (fichier edit.toggle lu par la couche). Il n'ecoute que la boucle locale.
+DWORD WINAPI httpThread(LPVOID) {
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return 0;
+    SOCKET ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (ls == INVALID_SOCKET) return 0;
+    sockaddr_in addr = {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(47321);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(ls, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0 || listen(ls, 4) != 0) {
+        closesocket(ls);
+        return 0;
+    }
+    for (;;) {
+        SOCKET c = accept(ls, nullptr, nullptr);
+        if (c == INVALID_SOCKET) break;
+        char buf[512] = {};
+        recv(c, buf, sizeof buf - 1, 0);
+        const bool toggle = std::strstr(buf, "GET /toggle") != nullptr;
+        if (toggle) {
+            if (gameWithLayerRunning()) std::ofstream(ovz::dataDir() / "edit.toggle") << "1";
+        }
+        const char* body = toggle ? (gameWithLayerRunning() ? "ok" : "no-game") : "OverlayVR";
+        char resp[256];
+        std::snprintf(resp, sizeof resp,
+                      "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+                      static_cast<int>(std::strlen(body)), body);
+        send(c, resp, static_cast<int>(std::strlen(resp)), 0);
+        closesocket(c);
+    }
+    closesocket(ls);
+    return 0;
+}
+
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     HANDLE once = CreateMutexW(nullptr, TRUE, L"Local\\OverlayVR_Tray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;  // deja lance : l'icone est la
@@ -394,6 +432,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     RegisterClassW(&wc);
     g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"OverlayVR", 0, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
     ovz::ensureConfigFile();
+    CloseHandle(CreateThread(nullptr, 0, httpThread, nullptr, 0, nullptr));
     updateIcon(true);
     SetTimer(g_hwnd, kTimer, 1500, nullptr);
     SetTimer(g_hwnd, kPollTimer, 40, nullptr);
