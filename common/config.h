@@ -28,6 +28,7 @@ struct Config {
     float gazeMargin = 8.0f;   // degres : le centre du regard doit viser la zone a cette marge pres (hysteresis +4 une fois affichee)
     float offset[3] = {0, 0, 0};  // decalage des zones pour les jeux SANS profil (metres), regle en jeu au clavier
     float offsetYawDeg = 0;       // rotation correspondante (degres) autour du centre des zones
+    bool inGameEditor = true;     // editeur de zones integre a la couche (en jeu, avec les manettes)
     bool hotkeys = true;          // Ctrl+Alt+fleches... pour recaler les zones en jeu
     std::string toggleKey = "space";      // touche clavier qui active / desactive les zones ("none" : aucune), ex. "ctrl+f9"
     std::string toggleJoystick;           // morceau du nom du joystick / HOTAS ("" : n'importe lequel)
@@ -57,6 +58,7 @@ inline bool loadConfig(Config& out) {
             for (int i = 0; i < 3; i++) c.offset[i] = j.at("offset").at(i).get<float>();
         c.offsetYawDeg = j.value("offset_yaw_deg", c.offsetYawDeg);
         c.hotkeys = j.value("hotkeys", c.hotkeys);
+        c.inGameEditor = j.value("in_game_editor", c.inGameEditor);
         c.toggleKey = j.value("toggle_key", c.toggleKey);
         c.toggleJoystick = j.value("toggle_joystick", c.toggleJoystick);
         c.toggleJoystickButton = j.value("toggle_joystick_button", c.toggleJoystickButton);
@@ -123,6 +125,7 @@ inline bool saveConfig(const Config& c) {
                         {"edge_overlap_cm", c.overlapCm},
                         {"edge_passes", c.edgePasses},
                         {"hotkeys", c.hotkeys},
+                        {"in_game_editor", c.inGameEditor},
                         {"toggle_key", c.toggleKey},
                         {"toggle_joystick", c.toggleJoystick},
                         {"toggle_joystick_button", c.toggleJoystickButton},

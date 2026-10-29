@@ -19,6 +19,24 @@ Deux programmes, un seul fichier de zones (`%APPDATA%\OverlayVR\zones.json`) :
 3. Dans Virtual Desktop, onglet *Streaming* : active le passthrough par couleur (chroma key) sur **RGB 255, 0, 255**
    et choisis VDXR comme runtime OpenXR.
 
+## Éditeur de zones EN JEU (sans fermer le jeu)
+
+Lancer `OverlayVR_Editor.exe` pendant que MSFS tourne ferme le jeu (Virtual Desktop n'accepte qu'une application VR à la
+fois). L'éditeur est donc aussi intégré à la couche OpenXR, comme Open Kneeboard : il s'ouvre **dans le jeu**.
+
+- **Ouvrir / fermer** : le même raccourci que pour lancer l'éditeur (`editor_key`, défaut Ctrl+Alt+E, ou le bouton de
+  HOTAS, ou le menu de l'icône de la barre d'état). Si un jeu avec la couche tourne, l'application de la barre d'état
+  bascule l'éditeur en jeu au lieu de lancer l'éditeur séparé. **Y** (main gauche) ferme aussi l'éditeur.
+- **Commandes** (rappelées dans un panneau devant toi) : main droite, gâchette = tracer (1er bord, largeur, haut, bas),
+  grip = déplacer la zone visée, B = supprimer, A = plan / volume, stick ▲▼ = hauteur du bureau (clic = hauteur de la
+  manette) ; main gauche, X = annuler. Les traits sont colorés (jaune : zone visée, cyan : zones, orange : tracé).
+- Pendant l'édition, les gâchettes ne font **rien dans le jeu** (ses actions sont suspendues). Les zones du jeu restent visibles
+  en magenta. Les zones créées reçoivent un nom automatique (renomme-les dans la fenêtre de configuration) et le jeu actif.
+- À l'ouverture, le recalage (décalage du jeu) est intégré aux positions des zones, puis remis à zéro.
+- Non pris en charge dans l'éditeur en jeu pour l'instant : formes libres (les zones existantes s'affichent), saisie du nom.
+- Désactivable : `"in_game_editor": false` dans `settings.json`. Le journal `layer.log` indique si les manettes ont pu être
+  ajoutées au jeu (« editeur en jeu : entrees des manettes ajoutees »).
+
 ## Utilisation
 
 1. Dans le casque, lance `OverlayVR_Editor.exe` depuis le bureau Virtual Desktop. Le fond est du passthrough.

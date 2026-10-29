@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cwchar>
+#include <fstream>
 #include <string>
 
 #include "../common/config.h"
@@ -217,7 +218,29 @@ bool editorRunning() {
     return found;
 }
 
+// Vrai si la couche OpenXR tourne dans un jeu (elle ecrit layer_alive toutes les ~1,5 s) et a l'editeur en jeu active.
+bool gameWithLayerRunning() {
+    if (!g_cfg.inGameEditor) return false;
+    WIN32_FILE_ATTRIBUTE_DATA attr;
+    const std::wstring path = (ovz::dataDir() / "layer_alive").wstring();
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attr)) return false;
+    FILETIME nowFt;
+    GetSystemTimeAsFileTime(&nowFt);
+    ULARGE_INTEGER a, b;
+    a.LowPart = nowFt.dwLowDateTime;
+    a.HighPart = nowFt.dwHighDateTime;
+    b.LowPart = attr.ftLastWriteTime.dwLowDateTime;
+    b.HighPart = attr.ftLastWriteTime.dwHighDateTime;
+    return a.QuadPart > b.QuadPart && (a.QuadPart - b.QuadPart) < 5ull * 10000000ull;  // moins de 5 s
+}
+
+// Dans un jeu, l'editeur separe ferme le jeu (une seule application VR a la fois) : on bascule l'editeur de la couche.
 void launchEditor() {
+    if (gameWithLayerRunning()) {
+        std::error_code ec;
+        std::ofstream(ovz::dataDir() / "edit.toggle") << "1";
+        return;
+    }
     if (editorRunning()) return;  // deja lance : un seul gestionnaire a la fois
     const std::wstring exe = g_exeDir + L"\\OverlayVR_Editor.exe";
     if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, g_exeDir.c_str(), SW_SHOW)) <= 32)
@@ -240,7 +263,7 @@ void pollEditorTriggers() {
     if (pressed && !g_editorKeyDown) trigger = true;
     g_editorKeyDown = pressed;
     if (g_joy.pressed(g_hwnd, g_cfg.editorJoystickButton, g_cfg.editorJoystick)) trigger = true;
-    if (trigger && !editorRunning()) {
+    if (trigger && (gameWithLayerRunning() || !editorRunning())) {
         MessageBeep(MB_OK);
         launchEditor();
     }
