@@ -89,6 +89,11 @@ Pour ajouter un jeu, lance-le une fois puis ouvre `layer.log` (raccourci « Jour
 
 ## Recaler les zones en jeu (au clavier)
 
+**Panneau de recalage dans le casque** : dès que tu appuies sur Ctrl+Alt en jeu, un panneau s'affiche devant toi (un peu
+sous le regard) avec le décalage actuel du jeu (X, hauteur, Z, rotation) et la liste des touches ; il disparaît 5 s après
+la dernière touche. Il est dessiné par la couche, donc visible dans tout jeu OpenXR. La couche ne lit pas les manettes :
+le panneau se pilote au clavier (ou aux boutons d'un HOTAS configurés comme touches).
+
 Le repère de la pièce n'est pas toujours exactement le même d'une session à l'autre : toutes les zones peuvent se retrouver
 légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :
 
@@ -102,21 +107,6 @@ légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :
 
 Le décalage est **propre à chaque jeu** (profil) : recaler MSFS ne touche pas Assetto Corsa. Il est enregistré dans `settings.json`
 (champs `offset` / `offset_yaw_deg` du profil) quelques instants après avoir relâché les touches. `"hotkeys": false` désactive ces raccourcis.
-
-## Recalage sur deux repères du bureau
-
-Le repère de Virtual Desktop bouge d'une session à l'autre (et à chaque recentrage avec le bouton Meta), donc les zones
-paraissent décalées. Virtual Desktop ne donne accès ni aux caméras (pas de QR codes ni de reconnaissance d'objets) ni aux
-ancres spatiales : on recale donc avec deux repères physiques fixes de ton bureau (ex. deux coins éloignés d'1 m ou plus),
-pointés avec la manette droite :
-
-1. Dans l'éditeur, **maintiens le clic du stick gauche 1 s** (bip). L'assistant démarre : les grips sont ignorés.
-2. Pose la manette **droite** sur le repère 1 (toujours le même, dans la même orientation), **gâchette droite** (bip).
-3. Pose-la sur le repère 2, **gâchette droite**. (B annule à tout moment.)
-
-Première fois : les repères sont mémorisés avec les zones (à faire zones bien alignées). Ensuite : même geste = les zones
-sont déplacées d'un bloc (position + rotation, pas la hauteur) et enregistrées. Pour redéfinir les repères : à l'étape 3,
-maintiens **A** en appuyant sur la gâchette. Un clic court sur le stick gauche affiche/masque toujours l'aide.
 
 ## Activer / désactiver les zones en jeu (touche ou bouton de HOTAS)
 

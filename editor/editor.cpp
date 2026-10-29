@@ -105,7 +105,7 @@ class Editor {
 public:
     void run() {
         SetEnvironmentVariableA("OVERLAYVR_DISABLE", "1");  // la couche globale ne doit pas s'ajouter ici
-        ovz::loadZones(ovz::zonesPath(), zones_, &seat_);
+        ovz::loadZones(ovz::zonesPath(), zones_);
         loadSettings();
         ovz::ensureConfigFile();
         loadProfiles();
@@ -217,11 +217,6 @@ private:
         std::vector<Saved> items;
     } grab_;
 
-    ovz::Anchor seat_;
-    float thumbHold_ = 0, calP1_[3] = {};
-    int calStep_ = 0;  // 0 : inactif ; 1/2 : attend le repere 1/2
-    std::vector<V3> calHist_;
-    bool thumbDone_ = false;
     bool showHelp_ = true;
     V3 hudPos_;
     float hudYaw_ = 0;
@@ -620,61 +615,7 @@ private:
     bool otherProfile(const Zone& z) const { return curProfile_ > 0 && !z.profile.empty() && z.profile != activeProfile(); }
 
     // --- donnees : enregistrement, historique, reglages ---------------------------------------------
-    void save() { ovz::saveZones(ovz::zonesPath(), zones_, &seat_); }
-
-    // Recalage sur deux reperes physiques fixes (coins du bureau...), pose par pose avec la manette droite : voir updateCalibration.
-    // Sans ancre (ou si `redefine`) memorise les reperes ; sinon deplace toutes les zones pour que les reperes memorises
-    // retombent sur ceux d'aujourd'hui.
-    void applyCalibration(const float p1[3], const float p2[3], bool redefine) {
-        ovz::Anchor now;
-        if (!ovz::anchorFromPoints(p1, p2, now)) {
-            std::printf("Recalage impossible : les deux reperes doivent etre ecartes d'au moins 30 cm (plus c'est loin, plus c'est precis)\n");
-            Beep(400, 200);
-            return;
-        }
-        if (!seat_.valid || redefine) {
-            seat_ = now;
-            std::printf("Reperes memorises. Aux prochains lancements, refais le meme geste sur les memes reperes.\n");
-        } else {
-            pushHistory();
-            std::printf("Zones recalees : %.2f m / %.2f m, %.1f deg\n", now.pos[0] - seat_.pos[0], now.pos[2] - seat_.pos[2],
-                        (now.yaw - seat_.yaw) * 180.0f / ovm::kPi);
-            ovz::rigidMove(zones_, seat_, now.pos, now.yaw);
-            seat_ = now;
-        }
-        save();
-        Beep(1200, 120);
-        calStep_ = 0;
-    }
-
-    // Assistant de recalage : clic du stick gauche maintenu 1 s. Pose la manette droite sur le repere 1, gachette ; sur le
-    // repere 2, gachette (A a la place = redefinir les reperes). B annule. Les grips etc. sont ignores pendant l'assistant.
-    void updateCalibration() {
-        const Hand& rh = hands_[1];
-        if (rh.tracked) {
-            calHist_.push_back(rh.pos);
-            if (calHist_.size() > 14) calHist_.erase(calHist_.begin());
-        }
-        if (in_.b.down()) {
-            calStep_ = 0;
-            std::printf("Recalage annule\n");
-            return;
-        }
-        if (!in_.trigR.down() || calHist_.empty()) return;
-        // position avant que la pression de la gachette ne bouge la main : moyenne des images plus anciennes que les 4 dernieres
-        const size_t n = calHist_.size() > 5 ? calHist_.size() - 4 : calHist_.size();
-        V3 m;
-        for (size_t i = 0; i < n; i++) m = m + calHist_[i];
-        m = m * (1.0f / n);
-        if (calStep_ == 1) {
-            calP1_[0] = m.x; calP1_[1] = m.y; calP1_[2] = m.z;
-            calStep_ = 2;
-            Beep(900, 100);
-        } else {
-            const float p2[3] = {m.x, m.y, m.z};
-            applyCalibration(calP1_, p2, in_.a.now);
-        }
-    }
+    void save() { ovz::saveZones(ovz::zonesPath(), zones_); }
 
     void pushHistory() {
         history_.push_back(zones_);
@@ -1140,29 +1081,9 @@ private:
             placeHud();
             hudPlaced_ = true;
         }
-        if (in_.thumbL.now) {  // pendant le maintien du clic gauche (et l'assistant), les grips sont ignores
-            in_.gripL.set(false);
-            in_.gripR.set(false);
-            thumbHold_ += dt;
-            if (!thumbDone_ && thumbHold_ >= 1.0f && calStep_ == 0) {
-                thumbDone_ = true;
-                calStep_ = 1;
-                calHist_.clear();
-                Beep(900, 100);
-            }
-        }
-        if (in_.thumbL.up()) {  // clic court : aide ; maintien : recalage (traite ci-dessus)
-            if (!thumbDone_) {
-                showHelp_ = !showHelp_;
-                if (showHelp_) placeHud();  // reapparait devant toi
-            }
-            thumbHold_ = 0;
-            thumbDone_ = false;
-        }
-        if (calStep_ > 0) {
-            updateCalibration();
-            updateHud();
-            return;
+        if (in_.thumbL.down()) {
+            showHelp_ = !showHelp_;
+            if (showHelp_) placeHud();  // reapparait devant toi
         }
         if (phase_ == Phase::Idle && !grab_.active) {  // stick droit haut/bas : monte/descend le plan de visee
             float sx, sy;
@@ -1273,8 +1194,6 @@ private:
             case Phase::Top: hint = std::wstring(mode_ == ZoneType::Poly ? L"2/3" : L"3/4") + L" Place la manette au SOMMET de l'objet, gâchette pour valider (B annule)"; break;
             case Phase::Bottom: hint = std::wstring(mode_ == ZoneType::Poly ? L"3/3" : L"4/4") + L" Descends la manette au BAS de l'objet (ou valide : bas = plan de visée), gâchette"; break;
         }
-        if (calStep_ == 1) hint = L"RECALAGE 1/2 : pose la manette DROITE sur le repère 1, puis gâchette (B annule)";
-        if (calStep_ == 2) hint = L"RECALAGE 2/2 : pose la manette DROITE sur le repère 2 (≥ 30 cm), gâchette (A + gâchette : redéfinir les repères)";
         if (xHold_ > 0.6f && in_.x.now && !xCleared_) hint = L"!Maintiens X… tout va être effacé";
         if (namingIdx_ >= 0) {
             const std::wstring keep = L"Échap : garder « " + widen(namingOrig_) + L" »";
@@ -1313,8 +1232,6 @@ private:
             L"Grip tenu dans le vide : déplacer TOUTES les zones (recalage) ;",
             L"     stick droit pendant ce geste : ◄► tourne fin, ▲▼ avance/recule",
             L"Clic stick : masquer / replacer l'aide devant toi         Menu : quitter",
-            L"Clic stick gauche MAINTENU 1 s : recalage (manette droite sur un repere du bureau,",
-            L"     gachette ; puis sur un 2e repere, gachette). 1re fois = memorise les reperes",
         });
     }
 

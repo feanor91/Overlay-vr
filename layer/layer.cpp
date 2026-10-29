@@ -164,6 +164,16 @@ struct State {
     ULONGLONG lastEnum = 0;
 } g;
 
+// Panneau de recalage affiche dans le casque (voir plus bas).
+constexpr int kHudW = 640, kHudH = 200;
+struct Hud {
+    XrSwapchain sc = XR_NULL_HANDLE;
+    bool tried = false, ready = false;
+    std::wstring last;
+    ULONGLONG until = 0;
+} hud;
+
+
 // --- reglages et zones (rechargees a chaud) -----------------------------------------------------
 // Decalage de recalage du jeu courant : celui de son profil, sinon le decalage commun.
 float* contextOffset() { return g.profileIdx >= 0 ? g.cfg.profiles[g.profileIdx].offset : g.cfg.offset; }
@@ -504,6 +514,8 @@ XrResult XRAPI_CALL ovCreateSession(XrInstance instance, const XrSessionCreateIn
 XrResult XRAPI_CALL ovDestroySession(XrSession session) {
     if (session == g.session) {
         if (g.swapchain) nx.DestroySwapchain(g.swapchain);
+        if (hud.sc) nx.DestroySwapchain(hud.sc);
+        hud = Hud();
         if (g.stage) nx.DestroySpace(g.stage);
         if (g.view) nx.DestroySpace(g.view);
         g.swapchain = XR_NULL_HANDLE;
@@ -555,6 +567,7 @@ void updateHotkeys(V3 fwd) {
     auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
     bool changed = false;
     if (down(VK_CONTROL) && down(VK_MENU)) {
+        hud.until = now + 5000;  // le panneau reste affiche 5 s apres la derniere touche
         const float move = (down(VK_SHIFT) ? 0.15f : 0.03f) * dt, turn = (down(VK_SHIFT) ? 15.0f : 3.0f) * dt;
         V3 f = {fwd.x, 0, fwd.z};
         const float n = ovm::length(f);
@@ -713,6 +726,208 @@ void recordPerf(const LARGE_INTEGER& t0, size_t layers) {
     }
 }
 
+// --- panneau de recalage dans le casque ---------------------------------------------------------
+// Texte GDI -> texture d'une couche quad collee a la tete (espace VIEW). Affiche pendant Ctrl+Alt et quelques secondes apres.
+// La couche ne lit pas les manettes : le panneau montre l'etat et les touches du clavier qui pilotent le recalage.
+std::wstring widenUtf8(const std::string& s) {
+    if (s.empty()) return L"";
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
+    return w;
+}
+
+std::vector<std::wstring> hudLines() {
+    const float* o = contextOffset();
+    wchar_t buf[200];
+    std::swprintf(buf, 200, L"Décalage :  X %+.2f m    hauteur %+.2f m    Z %+.2f m    rotation %+.1f°", o[0], o[1], o[2], contextYaw());
+    const std::wstring game = g.profileIdx >= 0 ? widenUtf8(g.cfg.profiles[g.profileIdx].name) : L"tous les jeux";
+    return {L"OverlayVR - recalage des zones (" + game + L")", buf,
+            L"Ctrl+Alt + flèches : déplacer (selon ton regard)   PgHaut/PgBas : hauteur",
+            L"Ctrl+Alt + Inser / Suppr : tourner      Maj : grands pas      Origine : remise à zéro",
+            L"Regarde droit devant toi ; les réglages sont enregistrés pour ce jeu."};
+}
+
+bool drawHudBits(const std::vector<std::wstring>& lines, std::vector<uint8_t>& px) {
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = kHudW;
+    bi.bmiHeader.biHeight = -kHudH;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    void* bits = nullptr;
+    HDC dc = CreateCompatibleDC(nullptr);
+    HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!dc || !bmp || !bits) {
+        if (bmp) DeleteObject(bmp);
+        if (dc) DeleteDC(dc);
+        return false;
+    }
+    HGDIOBJ oldBmp = SelectObject(dc, bmp);
+    HBRUSH bg = CreateSolidBrush(RGB(18, 22, 34));  // fond sombre : jamais proche du magenta de la cle chroma
+    RECT all = {0, 0, kHudW, kHudH};
+    FillRect(dc, &all, bg);
+    DeleteObject(bg);
+    HFONT font = CreateFontW(-21, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                             ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HGDIOBJ oldFont = SelectObject(dc, font);
+    SetBkMode(dc, TRANSPARENT);
+    int y = 10;
+    for (size_t i = 0; i < lines.size(); i++) {
+        SetTextColor(dc, i == 0 ? RGB(255, 210, 60) : i == 1 ? RGB(120, 255, 160) : RGB(235, 235, 235));
+        TextOutW(dc, 14, y, lines[i].c_str(), static_cast<int>(lines[i].size()));
+        y += 36;
+    }
+    GdiFlush();
+    px.assign(static_cast<uint8_t*>(bits), static_cast<uint8_t*>(bits) + static_cast<size_t>(kHudW) * kHudH * 4);
+    SelectObject(dc, oldFont);
+    DeleteObject(font);
+    SelectObject(dc, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(dc);
+    const bool rgba = g.format == DXGI_FORMAT_R8G8B8A8_UNORM || g.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    for (size_t i = 0; i < px.size(); i += 4) {
+        if (rgba) std::swap(px[i], px[i + 2]);
+        px[i + 3] = 255;
+    }
+    return true;
+}
+
+bool uploadD3D12(ID3D12Resource* tex, const std::vector<uint8_t>& px) {
+    const UINT pitch = (kHudW * 4 + 255) & ~255u;
+    ID3D12Resource* up = nullptr;
+    ID3D12CommandAllocator* alloc = nullptr;
+    ID3D12GraphicsCommandList* list = nullptr;
+    ID3D12Fence* fence = nullptr;
+    bool ok = false;
+    D3D12_HEAP_PROPERTIES hp = {};
+    hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+    D3D12_RESOURCE_DESC rd = {};
+    rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    rd.Width = static_cast<UINT64>(pitch) * kHudH;
+    rd.Height = 1;
+    rd.DepthOrArraySize = 1;
+    rd.MipLevels = 1;
+    rd.SampleDesc.Count = 1;
+    rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (SUCCEEDED(g.d3d12->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                   IID_PPV_ARGS(&up))) &&
+        SUCCEEDED(g.d3d12->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&alloc))) &&
+        SUCCEEDED(g.d3d12->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc, nullptr, IID_PPV_ARGS(&list))) &&
+        SUCCEEDED(g.d3d12->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
+        uint8_t* dst = nullptr;
+        D3D12_RANGE none = {0, 0};
+        if (SUCCEEDED(up->Map(0, &none, reinterpret_cast<void**>(&dst)))) {
+            for (int y = 0; y < kHudH; y++) std::memcpy(dst + static_cast<size_t>(y) * pitch, &px[static_cast<size_t>(y) * kHudW * 4], kHudW * 4);
+            up->Unmap(0, nullptr);
+            D3D12_RESOURCE_BARRIER b = {};
+            b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            b.Transition.pResource = tex;
+            b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            b.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            b.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            list->ResourceBarrier(1, &b);
+            D3D12_TEXTURE_COPY_LOCATION d = {}, sl = {};
+            d.pResource = tex;
+            d.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            sl.pResource = up;
+            sl.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            sl.PlacedFootprint.Footprint.Format = static_cast<DXGI_FORMAT>(g.format);
+            sl.PlacedFootprint.Footprint.Width = kHudW;
+            sl.PlacedFootprint.Footprint.Height = kHudH;
+            sl.PlacedFootprint.Footprint.Depth = 1;
+            sl.PlacedFootprint.Footprint.RowPitch = pitch;
+            list->CopyTextureRegion(&d, 0, 0, 0, &sl, nullptr);
+            std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
+            list->ResourceBarrier(1, &b);
+            list->Close();
+            ID3D12CommandList* lists[] = {list};
+            g.queue->ExecuteCommandLists(1, lists);
+            HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (ev && SUCCEEDED(g.queue->Signal(fence, 1)) && SUCCEEDED(fence->SetEventOnCompletion(1, ev))) {
+                WaitForSingleObject(ev, 2000);
+                ok = true;
+            }
+            if (ev) CloseHandle(ev);
+        }
+    }
+    if (fence) fence->Release();
+    if (list) list->Release();
+    if (alloc) alloc->Release();
+    if (up) up->Release();
+    return ok;
+}
+
+bool createHudSwapchain() {
+    XrSwapchainCreateInfo ci = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+    ci.format = g.format;
+    ci.sampleCount = 1;
+    ci.width = kHudW;
+    ci.height = kHudH;
+    ci.faceCount = 1;
+    ci.arraySize = 1;
+    ci.mipCount = 1;
+    return XR_SUCCEEDED(nx.CreateSwapchain(g.session, &ci, &hud.sc));
+}
+
+// Redessine le panneau si le texte a change. Faux : panneau inutilisable (on ne l'affiche pas).
+bool refreshHud() {
+    if (!hud.tried) {
+        hud.tried = true;
+        hud.ready = createHudSwapchain();
+        logf("panneau de recalage : %s", hud.ready ? "ok" : "echec");
+    }
+    if (!hud.ready) return false;
+    const std::vector<std::wstring> lines = hudLines();
+    std::wstring key;
+    for (auto& l : lines) key += l + L"\n";
+    if (key == hud.last) return true;
+    std::vector<uint8_t> px;
+    if (!drawHudBits(lines, px)) return false;
+    uint32_t count = 0;
+    nx.EnumerateSwapchainImages(hud.sc, 0, &count, nullptr);
+    std::vector<XrSwapchainImageD3D11KHR> img11;
+    std::vector<XrSwapchainImageD3D12KHR> img12;
+    if (g.api == Api::D3D11) {
+        img11.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR});
+        nx.EnumerateSwapchainImages(hud.sc, count, &count, reinterpret_cast<XrSwapchainImageBaseHeader*>(img11.data()));
+    } else {
+        img12.assign(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
+        nx.EnumerateSwapchainImages(hud.sc, count, &count, reinterpret_cast<XrSwapchainImageBaseHeader*>(img12.data()));
+    }
+    uint32_t index = 0;
+    XrSwapchainImageAcquireInfo ai = {XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    if (XR_FAILED(nx.AcquireSwapchainImage(hud.sc, &ai, &index))) return false;
+    XrSwapchainImageWaitInfo wi = {XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wi.timeout = XR_INFINITE_DURATION;
+    bool ok = XR_SUCCEEDED(nx.WaitSwapchainImage(hud.sc, &wi));
+    if (ok && g.api == Api::D3D11) {
+        ID3D11DeviceContext* ctx = nullptr;
+        g.d3d11->GetImmediateContext(&ctx);
+        ctx->UpdateSubresource(img11[index].texture, 0, nullptr, px.data(), kHudW * 4, 0);
+        ctx->Flush();
+        ctx->Release();
+    } else if (ok) {
+        ok = uploadD3D12(img12[index].texture, px);
+    }
+    XrSwapchainImageReleaseInfo ri = {XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    nx.ReleaseSwapchainImage(hud.sc, &ri);
+    if (ok) hud.last = key;
+    return ok;
+}
+
+XrCompositionLayerQuad makeHudQuad() {
+    XrCompositionLayerQuad quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    quad.space = g.view;
+    quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    quad.subImage.swapchain = hud.sc;
+    quad.subImage.imageRect = {{0, 0}, {kHudW, kHudH}};
+    quad.pose = toXr(V3{0, -0.14f, -0.85f}, Q{0, 0, 0, 1});
+    quad.size = {0.62f, 0.62f * kHudH / kHudW};
+    return quad;
+}
+
 XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     if (g.disabled || session != g.session || g.api == Api::None) return nx.EndFrame(session, info);
     LARGE_INTEGER t0;
@@ -752,7 +967,10 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
         if (quads.size() > 40) break;  // plafond de couches : chacune pese sur le GPU
         addZoneQuads(z, haveHead, head, quads);
     }
-    if (quads.empty()) {
+    XrCompositionLayerQuad hudQuad;
+    const bool showHud = GetTickCount64() < hud.until && refreshHud();
+    if (showHud) hudQuad = makeHudQuad();
+    if (quads.empty() && !showHud) {
         recordPerf(t0, 0);
         return nx.EndFrame(session, info);
     }
@@ -760,13 +978,14 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     // Chaque face est superposee plusieurs fois : un pixel de bord couvert a moitie passe a 75 %, 87 %... de magenta,
     // et Virtual Desktop l'efface avec le reste au lieu de laisser un liseré rose. Plafond de couches : chaque couche pese sur le GPU.
     const size_t base = quads.size();
-    const size_t passes = std::clamp<size_t>(24 / base, 1, static_cast<size_t>(g.cfg.edgePasses));
+    const size_t passes = base ? std::clamp<size_t>(24 / base, 1, static_cast<size_t>(g.cfg.edgePasses)) : 1;
     quads.reserve(base * passes);
     for (size_t p = 1; p < passes; p++)
         for (size_t i = 0; i < base; i++) quads.push_back(quads[i]);
 
     std::vector<const XrCompositionLayerBaseHeader*> layers(info->layers, info->layers + info->layerCount);
     for (auto& q : quads) layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&q));
+    if (showHud) layers.push_back(reinterpret_cast<const XrCompositionLayerBaseHeader*>(&hudQuad));  // en dernier : au-dessus
     XrFrameEndInfo modified = *info;
     modified.layerCount = static_cast<uint32_t>(layers.size());
     modified.layers = layers.data();

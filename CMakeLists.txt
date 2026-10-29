@@ -24,7 +24,7 @@ add_library(overlayvr_layer SHARED layer/layer.cpp)
 set_target_properties(overlayvr_layer PROPERTIES
   OUTPUT_NAME XR_APILAYER_OVERLAYVR_zones
   PREFIX "")
-target_link_libraries(overlayvr_layer PRIVATE OpenXR::headers nlohmann_json::nlohmann_json dxguid dinput8)
+target_link_libraries(overlayvr_layer PRIVATE OpenXR::headers nlohmann_json::nlohmann_json dxguid dinput8 gdi32 user32)
 add_custom_command(TARGET overlayvr_layer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_SOURCE_DIR}/layer/XR_APILAYER_OVERLAYVR_zones.json $<TARGET_FILE_DIR:overlayvr_layer>)
