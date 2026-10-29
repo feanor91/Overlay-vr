@@ -106,16 +106,17 @@ Le décalage est **propre à chaque jeu** (profil) : recaler MSFS ne touche pas 
 ## Recalage sur deux repères du bureau
 
 Le repère de Virtual Desktop bouge d'une session à l'autre (et à chaque recentrage avec le bouton Meta), donc les zones
-paraissent décalées. On les recale avec deux repères physiques fixes (ex. deux coins du bureau), relevés avec les manettes
-(bien plus précis que la tête) :
+paraissent décalées. Virtual Desktop ne donne accès ni aux caméras (pas de QR codes ni de reconnaissance d'objets) ni aux
+ancres spatiales : on recale donc avec deux repères physiques fixes de ton bureau (ex. deux coins éloignés d'1 m ou plus),
+pointés avec la manette droite :
 
-1. **Une fois**, zones bien alignées : pose une manette sur chaque repère (à au moins 30 cm l'un de l'autre) et **maintiens
-   le clic du stick gauche 1,5 s** (bip). Les repères sont mémorisés avec les zones. Pour les redéfinir : même geste en tenant
-   aussi le clic du stick droit.
-2. **À chaque session**, dans l'éditeur : même geste, manettes posées sur les mêmes repères. Les zones sont déplacées d'un
-   bloc (position + rotation, pas la hauteur) et enregistrées ; l'éditeur se ferme, le jeu lit les zones corrigées.
+1. Dans l'éditeur, **maintiens le clic du stick gauche 1 s** (bip). L'assistant démarre : les grips sont ignorés.
+2. Pose la manette **droite** sur le repère 1 (toujours le même, dans la même orientation), **gâchette droite** (bip).
+3. Pose-la sur le repère 2, **gâchette droite**. (B annule à tout moment.)
 
-Un clic court sur le stick gauche affiche toujours/masque l'aide. Les touches Ctrl+Alt+flèches en jeu restent disponibles.
+Première fois : les repères sont mémorisés avec les zones (à faire zones bien alignées). Ensuite : même geste = les zones
+sont déplacées d'un bloc (position + rotation, pas la hauteur) et enregistrées. Pour redéfinir les repères : à l'étape 3,
+maintiens **A** en appuyant sur la gâchette. Un clic court sur le stick gauche affiche/masque toujours l'aide.
 
 ## Activer / désactiver les zones en jeu (touche ou bouton de HOTAS)
 
