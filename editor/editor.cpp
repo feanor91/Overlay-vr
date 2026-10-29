@@ -217,7 +217,7 @@ private:
     } grab_;
 
     ovz::Anchor seat_;
-    float thumbHold_ = 0;
+    float thumbHold_ = 0, pressL_[3] = {}, pressR_[3] = {};
     bool thumbDone_ = false;
     bool showHelp_ = true;
     V3 hudPos_;
@@ -614,45 +614,29 @@ private:
     bool otherProfile(const Zone& z) const { return curProfile_ > 0 && !z.profile.empty() && z.profile != activeProfile(); }
 
     // --- donnees : enregistrement, historique, reglages ---------------------------------------------
-    void save() {
-        if (!seat_.valid && headValid_ && !zones_.empty()) setAnchorHere();  // premiere zone : la tete d'aujourd'hui sert d'ancre
-        ovz::saveZones(ovz::zonesPath(), zones_, &seat_);
-    }
+    void save() { ovz::saveZones(ovz::zonesPath(), zones_, &seat_); }
 
-    bool setAnchorHere() {
-        float yaw;
-        const V3 f = ovm::qrot(headRot_, V3{0, 0, -1});
-        if (!headValid_ || !ovz::headingFromForward(f.x, f.z, yaw)) return false;
-        seat_.valid = true;
-        seat_.pos[0] = headPos_.x;
-        seat_.pos[1] = headPos_.y;
-        seat_.pos[2] = headPos_.z;
-        seat_.yaw = yaw;
-        return true;
-    }
-
-    // Maintien du clic du stick gauche : sans ancre, memorise la tete comme ancre (zones deja bien alignees) ; avec ancre,
-    // deplace toutes les zones pour que l'ancre retombe sur la tete actuelle. Stick droit en plus du maintien : redefinit l'ancre.
+    // Maintien du clic du stick gauche, une manette posee sur chacun de deux reperes physiques fixes (coins du bureau...) :
+    // sans ancre (ou avec le clic du stick droit en plus) les memorise ; sinon deplace toutes les zones pour que les reperes
+    // memorises retombent sur ceux d'aujourd'hui. Les positions sont celles relevees au debut du clic.
     void recalibrate() {
-        float yaw;
-        const V3 f = ovm::qrot(headRot_, V3{0, 0, -1});
-        if (!headValid_ || !ovz::headingFromForward(f.x, f.z, yaw)) {
-            std::printf("Recalage impossible : regarde droit devant toi\n");
+        ovz::Anchor now;
+        if (!ovz::anchorFromPoints(pressL_, pressR_, now)) {
+            std::printf("Recalage impossible : pose chaque manette sur un repere, ecartes d'au moins 30 cm\n");
             Beep(400, 200);
             return;
         }
-        pushHistory();
         if (!seat_.valid || in_.thumbR.now) {
-            setAnchorHere();
-            std::printf("Ancre definie ici (position de la tete). Au prochain lancement, maintiens le clic du stick gauche pour recaler.\n");
+            seat_ = now;
+            std::printf("Reperes memorises. Aux prochains lancements, pose les manettes dessus et maintiens le clic du stick gauche.\n");
         } else {
-            const float to[3] = {headPos_.x, headPos_.y, headPos_.z};
-            std::printf("Zones recalees : %.2f m / %.2f m, %.1f deg\n", to[0] - seat_.pos[0], to[2] - seat_.pos[2],
-                        (yaw - seat_.yaw) * 180.0f / ovm::kPi);
-            ovz::rigidMove(zones_, seat_, to, yaw);
-            setAnchorHere();
+            pushHistory();
+            std::printf("Zones recalees : %.2f m / %.2f m, %.1f deg\n", now.pos[0] - seat_.pos[0], now.pos[2] - seat_.pos[2],
+                        (now.yaw - seat_.yaw) * 180.0f / ovm::kPi);
+            ovz::rigidMove(zones_, seat_, now.pos, now.yaw);
+            seat_ = now;
         }
-        ovz::saveZones(ovz::zonesPath(), zones_, &seat_);
+        save();
         Beep(1200, 120);
     }
 
@@ -1101,6 +1085,10 @@ private:
             placeHud();
             hudPlaced_ = true;
         }
+        if (in_.thumbL.down()) {  // positions des deux manettes au moment du clic
+            pressL_[0] = lh.pos.x; pressL_[1] = lh.pos.y; pressL_[2] = lh.pos.z;
+            pressR_[0] = rh.pos.x; pressR_[1] = rh.pos.y; pressR_[2] = rh.pos.z;
+        }
         if (in_.thumbL.now) {
             thumbHold_ += dt;
             if (!thumbDone_ && thumbHold_ >= 1.5f) {
@@ -1263,8 +1251,8 @@ private:
             L"Grip tenu dans le vide : déplacer TOUTES les zones (recalage) ;",
             L"     stick droit pendant ce geste : ◄► tourne fin, ▲▼ avance/recule",
             L"Clic stick : masquer / replacer l'aide devant toi         Menu : quitter",
-            L"Clic stick MAINTENU 1,5 s (assis, regard droit devant) : RECALER les zones",
-            L"     (1re fois = memorise l'ancre ; + clic stick droit = redefinir l'ancre)",
+            L"Clic stick gauche MAINTENU 1,5 s, une manette sur chaque repere du bureau :",
+            L"     RECALE les zones (1re fois = memorise les reperes ; + clic stick droit = les redefinir)",
         });
     }
 

@@ -31,9 +31,10 @@ struct Zone {
     std::vector<std::array<float, 2>> pts;
 };
 
-// Ancre : pose de la tete (position + cap) dans le repere des zones, relevee quand elles etaient bien alignees avec la
-// realite. A chaque session le repere STAGE du runtime peut avoir bouge (recentrage Meta...) ; en s'asseyant au meme endroit
-// on compare la tete d'aujourd'hui a l'ancre et on deplace toutes les zones d'un bloc (rotation + translation sur le plan
+// Ancre : deux reperes physiques fixes (ex. deux coins du bureau) releves avec les manettes quand les zones etaient bien
+// alignees. On garde leur milieu et le cap du segment qui les relie, dans le repere des zones. A chaque session le repere
+// STAGE du runtime peut avoir bouge (recentrage Meta...) : en reposant les manettes sur les memes reperes on obtient la
+// meme paire de points dans le nouveau repere, et on deplace toutes les zones d'un bloc (rotation + translation sur le plan
 // horizontal, la hauteur ne change pas).
 struct Anchor {
     bool valid = false;
@@ -41,10 +42,15 @@ struct Anchor {
     float yaw = 0;
 };
 
-// Cap d'une direction de visee (meme convention que `yaw` des zones). Faux si on regarde trop haut/bas.
-inline bool headingFromForward(float fx, float fz, float& yaw) {
-    if (fx * fx + fz * fz < 0.25f) return false;
-    yaw = std::atan2(-fx, -fz);
+// Anchor a partir de deux points (x, z) ; faux s'ils sont trop proches (< 30 cm) pour donner un cap fiable.
+inline bool anchorFromPoints(const float l[3], const float r[3], Anchor& out) {
+    const float dx = r[0] - l[0], dz = r[2] - l[2];
+    if (dx * dx + dz * dz < 0.09f) return false;
+    out.valid = true;
+    out.pos[0] = (l[0] + r[0]) / 2;
+    out.pos[1] = (l[1] + r[1]) / 2;
+    out.pos[2] = (l[2] + r[2]) / 2;
+    out.yaw = std::atan2(-dx, -dz);
     return true;
 }
 

@@ -103,20 +103,19 @@ légèrement décalées. Sans quitter le jeu, tiens **Ctrl + Alt** et utilise :
 Le décalage est **propre à chaque jeu** (profil) : recaler MSFS ne touche pas Assetto Corsa. Il est enregistré dans `settings.json`
 (champs `offset` / `offset_yaw_deg` du profil) quelques instants après avoir relâché les touches. `"hotkeys": false` désactive ces raccourcis.
 
-## Recalage automatique sur ta position (ancre de siège)
+## Recalage sur deux repères du bureau
 
 Le repère de Virtual Desktop bouge d'une session à l'autre (et à chaque recentrage avec le bouton Meta), donc les zones
-paraissent décalées. Comme tu t'assieds toujours au même endroit, on s'en sert :
+paraissent décalées. On les recale avec deux repères physiques fixes (ex. deux coins du bureau), relevés avec les manettes
+(bien plus précis que la tête) :
 
-1. **Une fois**, zones bien alignées, assis, regard droit devant : dans l'éditeur, **maintiens le clic du stick gauche
-   1,5 s** (bip aigu). La position et le cap de ta tête sont mémorisés avec les zones (« ancre »). Elle est aussi
-   mémorisée toute seule à la première zone dessinée. Pour la redéfinir : même geste en tenant aussi le clic du stick droit.
-2. **À chaque session**, assis, regard droit devant : **même geste dans l'éditeur** (les zones sont déplacées d'un bloc et
-   enregistrées), ou **en jeu : Ctrl+Alt+C** (recalage valable jusqu'à la fermeture du jeu ; les réglages
-   Ctrl+Alt+flèches s'ajoutent ensuite si besoin).
+1. **Une fois**, zones bien alignées : pose une manette sur chaque repère (à au moins 30 cm l'un de l'autre) et **maintiens
+   le clic du stick gauche 1,5 s** (bip). Les repères sont mémorisés avec les zones. Pour les redéfinir : même geste en tenant
+   aussi le clic du stick droit.
+2. **À chaque session**, dans l'éditeur : même geste, manettes posées sur les mêmes repères. Les zones sont déplacées d'un
+   bloc (position + rotation, pas la hauteur) et enregistrées ; l'éditeur se ferme, le jeu lit les zones corrigées.
 
-Le recalage corrige position et orientation sur le plan horizontal (pas la hauteur). Précision = la régularité avec
-laquelle tu poses la tête (quelques cm) ; pour affiner, utilise les touches Ctrl+Alt+flèches.
+Un clic court sur le stick gauche affiche toujours/masque l'aide. Les touches Ctrl+Alt+flèches en jeu restent disponibles.
 
 ## Activer / désactiver les zones en jeu (touche ou bouton de HOTAS)
 
