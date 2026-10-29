@@ -248,6 +248,9 @@ private:
         xrEnumerateInstanceExtensionProperties(nullptr, 0, &extCount, nullptr);
         std::vector<XrExtensionProperties> props(extCount, {XR_TYPE_EXTENSION_PROPERTIES});
         xrEnumerateInstanceExtensionProperties(nullptr, extCount, &extCount, props.data());
+        std::printf("Extensions OpenXR proposees (%u) :", extCount);
+        for (const auto& p : props) std::printf(" %s", p.extensionName);
+        std::printf("\n");
         for (const auto& p : props)
             if (std::strcmp(p.extensionName, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME) == 0) depthExt_ = true;
         for (const auto& p : props)
