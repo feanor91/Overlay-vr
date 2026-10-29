@@ -169,6 +169,7 @@ private:
     int counter_ = 1;
     // Nommage d'une zone qui vient d'etre tracee : on tape le nom au clavier, Entree valide, Echap garde le nom par defaut.
     int namingIdx_ = -1;
+    std::chrono::steady_clock::time_point namingEnd_ = std::chrono::steady_clock::now() - std::chrono::hours(1);
     std::string namingOrig_;
     std::wstring namingBuf_;
     bool namingTyped_ = false;
@@ -739,6 +740,25 @@ private:
 
     // --- actions ---------------------------------------------------------------------------------------
     void readInputs() {
+        // Suivi des mains : poser les manettes pour taper le nom fait passer le runtime en mains nues, dont les pincements
+        // sont vus comme des gachettes. Pendant la saisie du nom (et 4 s apres) on ignore donc tout ce qui dessine ou saisit.
+        const auto nowT = std::chrono::steady_clock::now();
+        if (namingIdx_ >= 0) namingEnd_ = nowT;
+        if (nowT - namingEnd_ < std::chrono::seconds(4)) {
+            in_.trigR.set(false);
+            in_.gripR.set(false);
+            in_.a.set(false);
+            in_.b.set(false);
+            in_.thumbR.set(false);
+            in_.trigL.set(false);
+            in_.gripL.set(false);
+            in_.x.set(false);
+            in_.y.set(false);
+            in_.thumbL.set(false);
+            in_.stickLy = 0;
+            if (boolState(menu_)) quit_ = true;
+            return;
+        }
         in_.trigR.set(floatState(trigger_, 1) > kTriggerOn);
         in_.gripR.set(floatState(squeeze_, 1) > kTriggerOn);
         in_.a.set(boolState(btnA_));
