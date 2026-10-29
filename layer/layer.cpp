@@ -144,6 +144,9 @@ struct State {
     std::vector<ovz::Zone> shown;  // zones chargees + decalage global
     ULONGLONG lastTick = 0, lastKeyChange = 0;
     bool offsetDirty = false;
+    double perfSumMs = 0, perfWorstMs = 0;  // temps passe par la couche a chaque image (hors appel au runtime)
+    unsigned perfFrames = 0;
+    ULONGLONG perfLogged = 0;
     int profileIdx = -1;      // profil du jeu courant (-1 : jeu sans profil)
     std::unordered_map<std::string, bool> gazeShown;  // hysteresis : zone actuellement affichee ou non
     bool active = true;  // reglages utilisateur : la couche dessine-t-elle dans ce jeu ?
@@ -690,13 +693,38 @@ void pollToggleJoystick() {
     }
 }
 
+// Mesure le travail de la couche par image (en jeu) : une ligne dans layer.log toutes les 60 s, pour savoir si elle pese.
+void recordPerf(const LARGE_INTEGER& t0, size_t layers) {
+    LARGE_INTEGER t1, freq;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&freq);
+    const double ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+    g.perfSumMs += ms;
+    g.perfWorstMs = std::max(g.perfWorstMs, ms);
+    g.perfFrames++;
+    const ULONGLONG now = GetTickCount64();
+    if (!g.perfLogged) g.perfLogged = now;
+    if (now - g.perfLogged >= 60000 && g.perfFrames > 0) {
+        logf("performances : %.2f ms par image en moyenne (pire %.1f ms), %zu couche(s) ajoutee(s), %u images", g.perfSumMs / g.perfFrames,
+             g.perfWorstMs, layers, g.perfFrames);
+        g.perfSumMs = g.perfWorstMs = 0;
+        g.perfFrames = 0;
+        g.perfLogged = now;
+    }
+}
+
 XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     if (g.disabled || session != g.session || g.api == Api::None) return nx.EndFrame(session, info);
+    LARGE_INTEGER t0;
+    QueryPerformanceCounter(&t0);
 
     pollToggleKey();
     pollToggleJoystick();
     refreshZones();
-    if (!g.active || g.shown.empty() || !ensureSwapchain()) return nx.EndFrame(session, info);
+    if (!g.active || g.shown.empty() || !ensureSwapchain()) {
+        recordPerf(t0, 0);
+        return nx.EndFrame(session, info);
+    }
 
     // Pose de la tete dans le repere STAGE, pour l'affichage conditionnel et le choix des faces.
     XrSpaceLocation loc = {XR_TYPE_SPACE_LOCATION};
@@ -724,7 +752,10 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
         if (quads.size() > 40) break;  // plafond de couches : chacune pese sur le GPU
         addZoneQuads(z, haveHead, head, quads);
     }
-    if (quads.empty()) return nx.EndFrame(session, info);
+    if (quads.empty()) {
+        recordPerf(t0, 0);
+        return nx.EndFrame(session, info);
+    }
 
     // Chaque face est superposee plusieurs fois : un pixel de bord couvert a moitie passe a 75 %, 87 %... de magenta,
     // et Virtual Desktop l'efface avec le reste au lieu de laisser un liseré rose. Plafond de couches : chaque couche pese sur le GPU.
@@ -739,6 +770,7 @@ XrResult XRAPI_CALL ovEndFrame(XrSession session, const XrFrameEndInfo* info) {
     XrFrameEndInfo modified = *info;
     modified.layerCount = static_cast<uint32_t>(layers.size());
     modified.layers = layers.data();
+    recordPerf(t0, quads.size());
     return nx.EndFrame(session, &modified);
 }
 

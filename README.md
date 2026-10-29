@@ -223,3 +223,16 @@ Ce code n'a **pas encore été testé avec un casque** : il compile, la logique 
 Dans le jeu, une forme libre est composée de rectangles : un par côté (les murs tournés vers toi) et des bandes de 5 cm au plus pour le dessus ou
 le dessous. Un contour **oblique** est donc légèrement en escalier. Chaque rectangle est une couche de plus pour le casque : garde les formes
 simples (une dizaine de sommets) si tes FPS baissent.
+
+## Diagnostic de performance
+
+Si les zones « nagent » quand tu bouges la tête ou si les FPS baissent :
+- **Dans l'éditeur** : la 2e ligne du panneau d'état affiche `N img/s, calcul X ms (pire Y)` : le nombre d'images par seconde, le temps
+  de calcul moyen de l'éditeur par image, et la pire image de la dernière seconde. La console de l'éditeur le répète toutes les 5 s.
+- **En jeu** : `layer.log` reçoit une ligne `performances : …` toutes les 60 s : temps moyen et pire passé par la couche à chaque image,
+  et nombre de couches ajoutées.
+
+Un calcul de quelques millisecondes ou moins est normal. Le retard visible quand la tête bouge vite vient surtout de la diffusion par
+Virtual Desktop : le passthrough est en temps réel dans le casque, alors que l'image virtuelle arrive avec quelques dizaines de
+millisecondes de retard (VD corrige la rotation de la tête, pas le déplacement). Pour savoir si une version a changé quelque chose,
+installe une ancienne version depuis la page Releases et compare.

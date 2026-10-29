@@ -212,6 +212,9 @@ private:
     V3 headPos_;
 
     float lastDt_ = 0.016f;
+    // Mesure de performance : images par seconde, temps de calcul de l'editeur (CPU) par image, pire image.
+    float perfAcc_ = 0, perfWork_ = 0, perfWorst_ = 0, perfFps_ = 0, perfAvgMs_ = 0, perfWorstMs_ = 0;
+    int perfFrames_ = 0, perfReports_ = 0;
 
     XrPath path(const char* s) {
         XrPath p;
@@ -1059,8 +1062,9 @@ private:
             hint = namingTyped_ ? L"Nom : " + namingBuf_ + L"_     (Entrée valide, " + keep + L")"
                                 : L"Zone créée : tape son nom au clavier puis Entrée (" + keep + L")";
         }
-        char buf[64];
-        std::snprintf(buf, sizeof buf, "%d zone(s)   |   bureau à %.2f m", static_cast<int>(zones_.size()), surfaceY_);
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "%d zone(s)  |  bureau à %.2f m  |  %.0f img/s, calcul %.1f ms (pire %.0f)", static_cast<int>(zones_.size()),
+                      surfaceY_, perfFps_, perfAvgMs_, perfWorstMs_);
         status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : mode_ == ZoneType::Poly ? L"FORME LIBRE" : L"VOLUME") + L"   |   Jeu actif : " +
                               (curProfile_ == 0 ? std::wstring(L"tous les jeux") : widen(activeProfile())),
                           widen(buf),
@@ -1151,6 +1155,10 @@ private:
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - lastFrame_).count();
         lastFrame_ = now;
+        if (dt < 1.0f) {
+            perfAcc_ += dt;
+            perfFrames_++;
+        }
 
         std::vector<XrCompositionLayerProjectionView> projViews;
         XrCompositionLayerProjection layer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
@@ -1210,6 +1218,19 @@ private:
             layer.views = projViews.data();
             layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer);
             layerCount = 1;
+        }
+
+        const float work = std::chrono::duration<float>(std::chrono::steady_clock::now() - now).count();  // calcul + rendu de l'image
+        perfWork_ += work;
+        perfWorst_ = std::max(perfWorst_, work);
+        if (perfAcc_ >= 1.0f && perfFrames_ > 0) {
+            perfFps_ = perfFrames_ / perfAcc_;
+            perfAvgMs_ = perfWork_ / perfFrames_ * 1000.0f;
+            perfWorstMs_ = perfWorst_ * 1000.0f;
+            if (++perfReports_ % 5 == 0)
+                std::printf("Performances : %.0f images/s, calcul %.1f ms par image (pire %.0f ms)\n", perfFps_, perfAvgMs_, perfWorstMs_);
+            perfAcc_ = perfWork_ = perfWorst_ = 0;
+            perfFrames_ = 0;
         }
 
         XrFrameEndInfo ei = {XR_TYPE_FRAME_END_INFO};
