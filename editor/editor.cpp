@@ -222,6 +222,7 @@ private:
     // Mesure de performance : images par seconde, temps de calcul de l'editeur (CPU) par image, pire image.
     float perfAcc_ = 0, perfWork_ = 0, perfWorst_ = 0, perfFps_ = 0, perfAvgMs_ = 0, perfWorstMs_ = 0;
     int perfFrames_ = 0, perfReports_ = 0;
+    float periodMs_ = 0;  // periode d'affichage annoncee par le runtime (xrWaitFrame) : 11 ms = 90 Hz, 33 ms = 30 Hz
 
     XrPath path(const char* s) {
         XrPath p;
@@ -250,6 +251,10 @@ private:
         XrSystemGetInfo si = {XR_TYPE_SYSTEM_GET_INFO};
         si.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
         CHK(xrGetSystem(instance_, &si, &system_));
+        XrInstanceProperties ip = {XR_TYPE_INSTANCE_PROPERTIES};
+        if (XR_SUCCEEDED(xrGetInstanceProperties(instance_, &ip)))
+            std::printf("Runtime OpenXR : %s (version %u.%u.%u)\n", ip.runtimeName, XR_VERSION_MAJOR(ip.runtimeVersion),
+                        XR_VERSION_MINOR(ip.runtimeVersion), XR_VERSION_PATCH(ip.runtimeVersion));
     }
 
     void initGraphics() {
@@ -1128,8 +1133,8 @@ private:
                                  namingTyped_ ? L"> " + namingBuf_ + L"_" : L"> (nom par défaut : " + widen(namingOrig_) + L")"});
         }
         char buf[160];
-        std::snprintf(buf, sizeof buf, "%d zone(s)  |  bureau à %.2f m  |  %.0f img/s, calcul %.1f ms (pire %.0f)", static_cast<int>(zones_.size()),
-                      surfaceY_, perfFps_, perfAvgMs_, perfWorstMs_);
+        std::snprintf(buf, sizeof buf, "%d zone(s)  |  bureau à %.2f m  |  %.0f img/s (runtime %.0f Hz), calcul %.1f ms", static_cast<int>(zones_.size()),
+                      surfaceY_, perfFps_, periodMs_ > 0 ? 1000.0f / periodMs_ : 0.0f, perfAvgMs_);
         status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : mode_ == ZoneType::Poly ? L"FORME LIBRE" : L"VOLUME") + L"   |   Jeu actif : " +
                               (curProfile_ == 0 ? std::wstring(L"tous les jeux") : widen(activeProfile())),
                           widen(buf),
@@ -1219,6 +1224,7 @@ private:
         XrFrameState fs = {XR_TYPE_FRAME_STATE};
         CHK(xrWaitFrame(session_, nullptr, &fs));
         CHK(xrBeginFrame(session_, nullptr));
+        periodMs_ = static_cast<float>(fs.predictedDisplayPeriod) / 1.0e6f;
 
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - lastFrame_).count();
@@ -1317,7 +1323,8 @@ private:
             perfAvgMs_ = perfWork_ / perfFrames_ * 1000.0f;
             perfWorstMs_ = perfWorst_ * 1000.0f;
             if (++perfReports_ % 5 == 0)
-                std::printf("Performances : %.0f images/s, calcul %.1f ms par image (pire %.0f ms)\n", perfFps_, perfAvgMs_, perfWorstMs_);
+                std::printf("Performances : %.0f images/s, calcul %.1f ms par image (pire %.0f ms), rythme du runtime : %.1f ms (%.0f Hz)\n", perfFps_,
+                            perfAvgMs_, perfWorstMs_, periodMs_, periodMs_ > 0 ? 1000.0f / periodMs_ : 0.0f);
             perfAcc_ = perfWork_ = perfWorst_ = 0;
             perfFrames_ = 0;
         }
