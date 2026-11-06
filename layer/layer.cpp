@@ -442,6 +442,7 @@ void addZoneQuads(const ovz::Zone& z, bool haveHead, V3 head, std::vector<XrComp
         faces.push_back({ovm::qaxis('x', hp), {0, -h / 2, 0}, w, d});
     }
     Q yaw = ovm::qaxis('y', z.yaw);
+    if (z.type == ovz::ZoneType::Plane && z.pitch != 0) yaw = ovm::qmul(yaw, ovm::qaxis('x', -z.pitch));  // plan incline
     V3 center = {z.pos[0], z.pos[1], z.pos[2]};
     for (const Face& f : faces) {
         Q q = ovm::qmul(yaw, f.rot);
@@ -522,7 +523,8 @@ bool inGaze(const ovz::Zone& z, V3 head, V3 fwd) {
     const bool shown = g.gazeShown[z.name];
     const float margin = (g.cfg.gazeMargin + (shown ? 4.0f : 0.0f)) * ovm::kPi / 180.0f;
     const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
-    const Q inv = ovm::qaxis('y', -z.yaw);
+    Q inv = ovm::qaxis('y', -z.yaw);
+    if (z.type == ovz::ZoneType::Plane && z.pitch != 0) inv = ovm::qmul(ovm::qaxis('x', z.pitch), inv);
     const V3 o = ovm::qrot(inv, head - c);  // origine et direction du rayon dans le repere de la zone
     const V3 d = ovm::qrot(inv, fwd);
     const float pad = std::max(0.02f, ovm::length(head - c) * std::tan(margin));  // marge angulaire, en metres, au niveau de la zone

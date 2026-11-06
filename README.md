@@ -35,7 +35,8 @@ Les commandes sont aussi **affichées dans le casque** (panneau à gauche, masqu
 | Action | Commande |
 |---|---|
 | Tracer une zone | Gâchette, en plusieurs temps : (1) maintiens la gâchette et tire le **1er bord** de A à B, c'est lui qui donne l'**orientation** ; (2) vise le côté opposé, gâchette pour valider. Un plan s'arrête là. Pour un volume : (3) place la manette au **sommet** de l'objet (la boîte suit ta main), gâchette ; (4) descends-la au **bas** de l'objet, gâchette (ou valide directement : le bas reste alors au plan de visée). Le haut et le bas sont des hauteurs réelles : une boîte peut donc dépasser du bureau **et** descendre dessous. Stick ▲▼ pour affiner, B annule |
-| Changer de mode de tracé | **A** : volume (cyan) → plan (jaune) → **forme libre** (orange). Le laser prend la couleur du mode |
+| Changer de mode de tracé | **A** : volume (cyan) → plan (jaune) → **plan incliné** (jaune) → **forme libre** (orange). Le laser prend la couleur du mode |
+| Tracer un **plan incliné** (tablette sur un support…) | Mode plan incliné : 1er bord et largeur comme un plan, puis **pose la manette droite sur la tablette et pointe-la dans le sens de la pente** (la manette donne l'inclinaison et la hauteur ; stick droit ▲▼ pour affiner), **gâchette** pour valider. Le plan s'affiche tel quel en jeu |
 | Tracer une **forme libre** | Mode forme libre : **gâchette à chaque sommet** du contour (sur le plan de visée), puis **clic sur le 1er point** (ou **A**) pour fermer ; **B** retire le dernier sommet. Ensuite, comme un volume : manette au **sommet** puis au **bas**, gâchette à chaque fois. Formes concaves possibles (L, U…) |
 | Déplacer / orienter une zone | Grip tenu sur la zone visée, puis bouge la main et **tourne le poignet** ; stick droit ◄► tourne, ▲▼ agrandit/réduit ; stick gauche ▲▼ change la hauteur seule |
 | Supprimer | B sur la zone visée (ou B pendant qu'on la tient) |

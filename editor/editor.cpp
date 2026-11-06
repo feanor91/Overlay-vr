@@ -156,7 +156,9 @@ private:
     ZoneType mode_ = ZoneType::Box;
 
     // Tracé en 3 temps : 1er bord (A -> B, donne l'orientation), puis largeur du cote oppose, puis hauteur (volume).
-    enum class Phase { Idle, Edge, Depth, Points, Top, Bottom };
+    enum class Phase { Idle, Edge, Depth, Tilt, Points, Top, Bottom };
+    bool tilted_ = false;  // mode PLAN INCLINE : apres le rectangle, on regle l'inclinaison et la hauteur a la manette
+    float tiltBase_ = 0, tiltAdj_ = 0;
     Phase phase_ = Phase::Idle;
     V3 anchor_, corner_;
     float drawYaw_ = 0, dz_ = 0.02f, heightAdj_ = 0, topY_ = 0, bottomRefY_ = 0;
@@ -662,6 +664,7 @@ private:
             const Zone& z = zones_[i];
             if (otherProfile(z)) continue;
             Q inv = ovm::qaxis('y', -z.yaw);
+            if (z.type == ZoneType::Plane && z.pitch != 0) inv = ovm::qmul(ovm::qaxis('x', z.pitch), inv);
             V3 lo = ovm::qrot(inv, o - V3{z.pos[0], z.pos[1], z.pos[2]});
             V3 ld = ovm::qrot(inv, d);
             const float org[3] = {lo.x, lo.y, lo.z}, dir[3] = {ld.x, ld.y, ld.z};
@@ -890,7 +893,7 @@ private:
 
     void commitPreview() {
         pushHistory();
-        preview_.name = (mode_ == ZoneType::Plane ? "plan" : mode_ == ZoneType::Poly ? "forme" : "volume") + std::to_string(counter_++);
+        preview_.name = (mode_ == ZoneType::Plane ? (tilted_ ? "plan incline" : "plan") : mode_ == ZoneType::Poly ? "forme" : "volume") + std::to_string(counter_++);
         preview_.profile = activeProfile();
         zones_.push_back(preview_);
         save();
@@ -1030,7 +1033,10 @@ private:
                 if (in_.b.down()) {
                     cancelDrawing();
                 } else if (in_.trigR.down() && std::fabs(dz_) >= 0.05f) {
-                    if (mode_ == ZoneType::Plane) {
+                    if (mode_ == ZoneType::Plane && tilted_) {
+                        phase_ = Phase::Tilt;
+                        tiltBase_ = tiltAdj_ = 0;
+                    } else if (mode_ == ZoneType::Plane) {
                         commitPreview();
                     } else {
                         phase_ = Phase::Top;
@@ -1038,6 +1044,21 @@ private:
                     }
                 }
                 break;
+            case Phase::Tilt: {  // plan incline : inclinaison = direction de la manette (ou stick), hauteur = manette
+                float sx, sy;
+                stickState(1, sx, sy);
+                if (std::fabs(sy) > 0.15f) tiltAdj_ += sy * 0.7f * lastDt_;
+                const V3 zd = {std::sin(drawYaw_), 0, std::cos(drawYaw_)};
+                const V3 d = ovm::qrot(rh.aimRot, V3{0, 0, -1});
+                const float along = ovm::dot(d, zd);
+                if (rh.aimTracked && std::fabs(along) > 0.35f) tiltBase_ = std::atan2(d.y * (along >= 0 ? 1.0f : -1.0f), std::fabs(along));
+                buildPreview(dz_, surfaceY_, surfaceY_ + 0.02f);
+                preview_.pitch = std::clamp(tiltBase_ + tiltAdj_, -1.4f, 1.4f);
+                preview_.pos[1] = rh.pos.y;
+                if (in_.b.down()) cancelDrawing();
+                else if (in_.trigR.down()) commitPreview();
+                break;
+            }
             case Phase::Top: {  // la manette est au SOMMET de l'objet : sa hauteur reelle fixe le haut de la boite
                 float sx, sy;
                 stickState(1, sx, sy);
@@ -1122,8 +1143,11 @@ private:
 
         if (phase_ == Phase::Idle && !grab_.active) {
             if (in_.a.down()) {
-                mode_ = mode_ == ZoneType::Box ? ZoneType::Plane : mode_ == ZoneType::Plane ? ZoneType::Poly : ZoneType::Box;
-                std::printf("Mode : %s\n", mode_ == ZoneType::Box ? "VOLUME" : mode_ == ZoneType::Plane ? "PLAN" : "FORME LIBRE");
+                if (mode_ == ZoneType::Box) mode_ = ZoneType::Plane, tilted_ = false;
+                else if (mode_ == ZoneType::Plane && !tilted_) tilted_ = true;
+                else if (mode_ == ZoneType::Plane) mode_ = ZoneType::Poly, tilted_ = false;
+                else mode_ = ZoneType::Box;
+                std::printf("Mode : %s\n", mode_ == ZoneType::Box ? "VOLUME" : mode_ == ZoneType::Plane ? (tilted_ ? "PLAN INCLINE" : "PLAN") : "FORME LIBRE");
             }
             if (in_.b.down() && hover_[1] >= 0) {  // supprimer la zone visee
                 pushHistory();
@@ -1186,8 +1210,11 @@ private:
                 hint = grab_.active ? L"Saisie : déplace la main, tourne le poignet pour orienter"
                                     : L"Prêt : vise le bureau et maintiens la gâchette droite pour tracer";
                 break;
-            case Phase::Edge: hint = std::wstring(L"1/") + (plane ? L"2" : L"4") + L" Tire le 1er bord jusqu'à l'autre coin, puis relâche (B annule)"; break;
-            case Phase::Depth: hint = std::wstring(L"2/") + (plane ? L"2" : L"4") + L" Vise le côté opposé, gâchette pour valider (B annule)"; break;
+            case Phase::Edge: hint = std::wstring(L"1/") + (plane ? (tilted_ ? L"3" : L"2") : L"4") + L" Tire le 1er bord jusqu'à l'autre coin, puis relâche (B annule)"; break;
+            case Phase::Tilt:
+                hint = L"3/3 Pose la manette sur la tablette, pointe-la dans le sens de la pente (stick ▲▼ affine), gâchette (B annule)";
+                break;
+            case Phase::Depth: hint = std::wstring(L"2/") + (plane ? (tilted_ ? L"3" : L"2") : L"4") + L" Vise le côté opposé, gâchette pour valider (B annule)"; break;
             case Phase::Points:
                 hint = L"Forme libre : gâchette à chaque sommet ; clic sur le 1er point (ou A) ferme ; B retire le dernier";
                 break;
@@ -1208,7 +1235,7 @@ private:
         char buf[160];
         std::snprintf(buf, sizeof buf, "%d zone(s)  |  bureau à %.2f m  |  %.0f img/s (runtime %.0f Hz), calcul %.1f ms", static_cast<int>(zones_.size()),
                       surfaceY_, perfFps_, periodMs_ > 0 ? 1000.0f / periodMs_ : 0.0f, perfAvgMs_);
-        status_.setLines({std::wstring(L"#Mode : ") + (plane ? L"PLAN" : mode_ == ZoneType::Poly ? L"FORME LIBRE" : L"VOLUME") + L"   |   Jeu actif : " +
+        status_.setLines({std::wstring(L"#Mode : ") + (plane ? (tilted_ ? L"PLAN INCLINÉ" : L"PLAN") : mode_ == ZoneType::Poly ? L"FORME LIBRE" : L"VOLUME") + L"   |   Jeu actif : " +
                               (curProfile_ == 0 ? std::wstring(L"tous les jeux") : widen(activeProfile())),
                           widen(buf),
                           hint,
@@ -1220,7 +1247,7 @@ private:
             L"Grip tenu sur une zone visée : la déplacer ; tourne le poignet",
             L"     pour l'orienter ; stick ◄► tourne, ▲▼ taille ; stick gauche ▲▼ hauteur",
             L"B sur une zone visée : la supprimer",
-            L"A : volume / plan / forme libre        Stick ▲▼ : monter/descendre le plan de visée",
+            L"A : volume / plan / plan incliné / forme libre        Stick ▲▼ : monter/descendre le plan de visée",
             L"Forme libre : gâchette à chaque sommet, A ou clic sur le 1er point ferme, B retire",
             L"Clic stick : plan de visée = hauteur de la manette (posée sur le bureau)",
             L"#MAIN GAUCHE",

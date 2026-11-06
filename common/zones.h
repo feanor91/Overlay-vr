@@ -22,6 +22,7 @@ struct Zone {
     float pos[3] = {0, 0, 0};          // centre
     float yaw = 0;                     // rotation autour de Y, radians
     float size[3] = {0.3f, 0.3f, 0.3f};  // largeur X, hauteur Y, profondeur Z (hauteur ignoree pour un plan)
+    float pitch = 0;                   // plan seulement : inclinaison autour de l'axe X local, radians ; > 0 : le bord +Z (profondeur) monte
     float look = 0;                    // > 0 : visible seulement si le regard descend d'au moins look degres
     bool enabled = true;
     std::string profile;               // jeu auquel la zone appartient ("" = tous les jeux)
@@ -56,6 +57,7 @@ inline bool loadZones(const std::filesystem::path& path, std::vector<Zone>& out)
                 z.size[i] = size.at(i).get<float>();
             }
             z.yaw = e.value("yaw", 0.0f);
+            z.pitch = z.type == ZoneType::Plane ? e.value("pitch", 0.0f) : 0.0f;
             z.look = e.value("look", 0.0f);
             z.enabled = e.value("enabled", true);
             z.profile = e.value("profile", "");
@@ -80,6 +82,7 @@ inline bool saveZones(const std::filesystem::path& path, const std::vector<Zone>
                             {"pos", {z.pos[0], z.pos[1], z.pos[2]}},
                             {"size", {z.size[0], z.size[1], z.size[2]}},
                             {"yaw", z.yaw},
+                            {"pitch", z.pitch},
                             {"look", z.look},
                             {"enabled", z.enabled},
                             {"profile", z.profile}};

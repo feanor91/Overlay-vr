@@ -321,7 +321,9 @@ inline void drawZone(Renderer& r, const ovz::Zone& z, const float edgeRgba[4], f
     const bool plane = z.type == ovz::ZoneType::Plane;
     const V3 size = {z.size[0], plane ? 0.0f : z.size[1], z.size[2]};
     const V3 c = {z.pos[0], z.pos[1], z.pos[2]};
-    Mat4 frame = ovm::mFromPose(c, ovm::qaxis('y', z.yaw));
+    ovm::Q fq = ovm::qaxis('y', z.yaw);
+    if (plane && z.pitch != 0) fq = ovm::qmul(fq, ovm::qaxis('x', -z.pitch));
+    Mat4 frame = ovm::mFromPose(c, fq);
     auto bar = [&](V3 pos, V3 dim) {
         r.box(ovm::mmul(frame, ovm::mmul(ovm::mTranslate(pos), ovm::mScale(dim))), edgeRgba);
     };
