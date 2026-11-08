@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cwchar>
 #include <string>
+#include <vector>
 
 #include "../common/config.h"
 #include "../common/joypoll.h"
@@ -217,8 +218,31 @@ bool editorRunning() {
     return found;
 }
 
+// Vrai si un jeu configure (profils / liste d'applications) tourne : l'editeur prendrait la session VR et ferait quitter le jeu.
+bool gameRunning() {
+    std::vector<std::string> names;
+    for (const ovz::Profile& p : g_cfg.profiles) names.insert(names.end(), p.apps.begin(), p.apps.end());
+    names.insert(names.end(), g_cfg.apps.begin(), g_cfg.apps.end());
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe = {sizeof pe};
+    bool found = false;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe)) {
+        char exe[260] = {};
+        WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, exe, sizeof exe - 1, nullptr, nullptr);
+        for (const std::string& n : names)
+            if (ovz::stripExe(n) == ovz::stripExe(exe)) found = true;
+    }
+    CloseHandle(snap);
+    return found;
+}
+
 void launchEditor() {
-    if (editorRunning()) return;  // deja lance : un seul gestionnaire a la fois
+    if (editorRunning()) return;
+    if (gameRunning()) {  // le casque est occupe par le jeu : l'editeur ne s'afficherait pas et ferait quitter la VR
+        MessageBeep(MB_ICONHAND);
+        return;
+    }  // deja lance : un seul gestionnaire a la fois
     const std::wstring exe = g_exeDir + L"\\OverlayVR_Editor.exe";
     if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, g_exeDir.c_str(), SW_SHOW)) <= 32)
         MessageBoxW(nullptr, L"OverlayVR_Editor.exe est introuvable à côté de cette application.", L"OverlayVR", MB_ICONWARNING);

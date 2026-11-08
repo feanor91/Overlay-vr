@@ -31,7 +31,7 @@ struct Config {
     bool hotkeys = true;          // Ctrl+Alt+fleches... pour recaler les zones en jeu
     std::string toggleKey = "space";      // touche clavier qui active / desactive les zones ("none" : aucune), ex. "ctrl+f9"
     std::string toggleJoystick;           // morceau du nom du joystick / HOTAS ("" : n'importe lequel)
-    std::string editorKey = "ctrl+alt+e";  // touche qui lance le gestionnaire de zones (application de la barre d'etat) ; "none" : aucune
+    std::string editorKey = "ctrl+shift+f11";  // touche qui lance le gestionnaire de zones (application de la barre d'etat) ; "none" : aucune
     std::string editorJoystick;           // morceau du nom du joystick / HOTAS pour lancer le gestionnaire ("" : n'importe lequel)
     int editorJoystickButton = 0;         // numero du bouton (comme dans joy.cpl, a partir de 1) ; 0 : aucun
     int toggleJoystickButton = 0;         // numero du bouton (comme dans joy.cpl, a partir de 1) ; 0 : aucun
@@ -61,6 +61,7 @@ inline bool loadConfig(Config& out) {
         c.toggleJoystick = j.value("toggle_joystick", c.toggleJoystick);
         c.toggleJoystickButton = j.value("toggle_joystick_button", c.toggleJoystickButton);
         c.editorKey = j.value("editor_key", c.editorKey);
+        if (c.editorKey == "ctrl+alt+e") c.editorKey = "ctrl+shift+f11";  // ancien defaut : demarrait l'avion dans MSFS
         c.editorJoystick = j.value("editor_joystick", c.editorJoystick);
         c.editorJoystickButton = j.value("editor_joystick_button", c.editorJoystickButton);
         c.edgePasses = std::clamp(j.value("edge_passes", c.edgePasses), 1, 6);

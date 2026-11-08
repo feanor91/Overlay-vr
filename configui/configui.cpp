@@ -56,7 +56,7 @@ std::vector<std::string> g_comboNames;  // nom de joystick de chaque ligne de la
 std::string g_keyText = "space";
 std::string g_joyName;
 int g_joyButton = 0;
-std::string g_edKeyText = "ctrl+alt+e";  // touche / bouton qui lancent le gestionnaire de zones
+std::string g_edKeyText = "ctrl+shift+f11";  // touche / bouton qui lancent le gestionnaire de zones
 std::string g_edJoyName;
 int g_edJoyButton = 0;
 int g_captureFor = 0;  // 0 : rien ; 1 : touche de bascule des zones ; 2 : touche du gestionnaire de zones

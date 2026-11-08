@@ -168,6 +168,8 @@ Dans l'éditeur :
 
 ## Lancer le gestionnaire de zones au clavier ou au HOTAS
 
+**Important** : le casque ne peut afficher qu'une application VR à la fois. L'éditeur ne peut donc pas s'ouvrir pendant que MSFS (ou un autre jeu configuré) tourne : la barre d'état refuse alors de le lancer (bip d'erreur) pour ne pas te faire quitter la VR. Crée et ajuste tes zones **avant** de lancer le jeu ; en jeu, utilise Ctrl+Alt+flèches pour l'ajustement rapide.
+
 Sans toucher à la souris ni à la fenêtre de configuration : l'**application de la barre d'état** (il faut qu'elle tourne, comme d'habitude
 après l'installation) surveille une touche du clavier et un bouton de joystick / HOTAS, et lance le gestionnaire de zones quand tu
 les actionnes. Rien ne demande les droits administrateur.
@@ -180,14 +182,14 @@ HOTAS : le périphérique et le numéro de bouton sont renseignés. Un encart af
 - **HOTAS** : aucun bouton par défaut. À la main, dans `settings.json` (clic droit sur l'icône → *Modifier settings.json*) :
 
 ```json
-"editor_key": "ctrl+alt+e",
+"editor_key": "ctrl+shift+f11",
 "editor_joystick": "Throttle",
 "editor_joystick_button": 14
 ```
 
 | Réglage | Valeurs |
 |---|---|
-| `editor_key` (défaut `"ctrl+alt+e"`) | Même format que `toggle_key` : `f9`, `ctrl+f9`, `space`… ; `"none"` : pas de touche |
+| `editor_key` (défaut `"ctrl+shift+f11"`) | Même format que `toggle_key` : `f9`, `ctrl+f9`, `space`… ; `"none"` : pas de touche |
 | `editor_joystick_button` (défaut `0` : aucun) | Numéro du bouton, comme dans `joy.cpl` (même numérotation que `toggle_joystick_button`), de 1 à 128 |
 | `editor_joystick` (défaut `""`) | Morceau du nom du périphérique, sans tenir compte des majuscules ; vide : n'importe quel joystick |
 
