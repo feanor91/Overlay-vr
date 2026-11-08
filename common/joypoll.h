@@ -27,6 +27,13 @@ public:
     bool pressed(HWND window, int button, const std::string& nameFilter) {
         if (button < 1 || button > 128) return false;
         const ULONGLONG now = GetTickCount64();
+        std::string wanted = nameFilter;
+        std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (wanted != filter_) {  // filtre change : on rouvre uniquement les bons peripheriques
+            close();
+            filter_ = wanted;
+            lastEnum_ = 0;
+        }
         if (!di_) {
             if (lastEnum_ && now - lastEnum_ < 10000) return false;
             if (FAILED(DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8W,
@@ -43,8 +50,6 @@ public:
             di_->EnumDevices(DI8DEVCLASS_GAMECTRL, &JoyButton::enumCallback, this, DIEDFL_ATTACHEDONLY);
             if (joys_.empty()) return false;
         }
-        std::string wanted = nameFilter;
-        std::transform(wanted.begin(), wanted.end(), wanted.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         bool edge = false, lost = false;
         for (Joy& j : joys_) {
             if (!wanted.empty()) {
@@ -79,6 +84,13 @@ private:
 
     static BOOL CALLBACK enumCallback(const DIDEVICEINSTANCEW* inst, void* self) {
         auto* me = static_cast<JoyButton*>(self);
+        char name[260] = {};
+        WideCharToMultiByte(CP_UTF8, 0, inst->tszProductName, -1, name, sizeof name - 1, nullptr, nullptr);
+        if (!me->filter_.empty()) {  // on n'ouvre que le peripherique voulu : les autres (HOTAS, palonnier...) ne sont jamais touches
+            std::string n = name;
+            std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (n.find(me->filter_) == std::string::npos) return DIENUM_CONTINUE;
+        }
         IDirectInputDevice8W* dev = nullptr;
         if (FAILED(me->di_->CreateDevice(inst->guidInstance, &dev, nullptr))) return DIENUM_CONTINUE;
         if (FAILED(dev->SetDataFormat(&c_dfDIJoystick2)) ||
@@ -86,8 +98,6 @@ private:
             dev->Release();
             return DIENUM_CONTINUE;
         }
-        char name[260] = {};
-        WideCharToMultiByte(CP_UTF8, 0, inst->tszProductName, -1, name, sizeof name - 1, nullptr, nullptr);
         me->joys_.push_back({dev, name, false});
         return DIENUM_CONTINUE;
     }
@@ -104,6 +114,7 @@ private:
     HWND window_ = nullptr;
     std::vector<Joy> joys_;
     ULONGLONG lastEnum_ = 0;
+    std::string filter_ = "\x01";  // filtre applique a l'ouverture (valeur initiale impossible : force la premiere ouverture filtree)
 };
 
 }  // namespace ovz

@@ -40,9 +40,10 @@ enum : int {
 constexpr UINT_PTR kTimer = 1;
 
 struct Dev {
-    IDirectInputDevice8W* dev;
+    IDirectInputDevice8W* dev;  // nul tant qu'on n'est pas en train de detecter un bouton
     std::string name;
     bool down[128];
+    GUID guid;
 };
 
 HINSTANCE g_inst = nullptr;
@@ -115,24 +116,38 @@ void edit(int x, int y, int w, int id, bool readOnly = false) {
 }
 
 // --- joysticks (DirectInput) ------------------------------------------------------------------------
+// Les peripheriques ne sont que listes (nom + identifiant) : on ne les ouvre pas, pour ne jamais gener le HOTAS pendant que
+// MSFS tourne. Ils ne sont ouverts que le temps d'une detection de bouton (clic sur « Detecter… »).
 BOOL CALLBACK enumJoystick(const DIDEVICEINSTANCEW* inst, void*) {
-    IDirectInputDevice8W* dev = nullptr;
-    if (FAILED(g_di->CreateDevice(inst->guidInstance, &dev, nullptr))) return DIENUM_CONTINUE;
-    if (FAILED(dev->SetDataFormat(&c_dfDIJoystick2)) ||
-        FAILED(dev->SetCooperativeLevel(g_wnd, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE))) {
-        dev->Release();
-        return DIENUM_CONTINUE;
-    }
-    Dev d = {dev, U(inst->tszProductName), {}};
+    Dev d = {nullptr, U(inst->tszProductName), {}, inst->guidInstance};
     g_devs.push_back(d);
     return DIENUM_CONTINUE;
 }
 
-void closeDevices() {
+void releaseDevices() {
     for (Dev& d : g_devs) {
+        if (!d.dev) continue;
         d.dev->Unacquire();
         d.dev->Release();
+        d.dev = nullptr;
     }
+}
+
+void openDevices() {
+    for (Dev& d : g_devs) {
+        if (d.dev || !g_di) continue;
+        IDirectInputDevice8W* dev = nullptr;
+        if (FAILED(g_di->CreateDevice(d.guid, &dev, nullptr))) continue;
+        if (FAILED(dev->SetDataFormat(&c_dfDIJoystick2)) || FAILED(dev->SetCooperativeLevel(g_wnd, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE))) {
+            dev->Release();
+            continue;
+        }
+        d.dev = dev;
+    }
+}
+
+void closeDevices() {
+    releaseDevices();
     g_devs.clear();
 }
 
@@ -249,6 +264,10 @@ void stopKeyCapture() {
 
 void stopDetect() {
     g_detectFor = 0;
+    releaseDevices();  // plus aucun acces au HOTAS en dehors de la detection
+    g_liveShown.clear();
+    setText(ID_LIVE, L"Le HOTAS n'est lu que pendant « Détecter… » (pour ne jamais gêner MSFS).");
+    setText(ID_EDLIVE, L"Le HOTAS n'est lu que pendant « Détecter… » (pour ne jamais gêner MSFS).");
     setText(ID_BTNDETECT, L"Détecter…");
     setText(ID_EDBTNDETECT, L"Détecter…");
 }
@@ -279,8 +298,10 @@ void pollKeys() {
 }
 
 void pollJoysticks() {
+    if (!g_detectFor) return;  // le HOTAS n'est lu que pendant une detection
     std::wstring live;
     for (Dev& d : g_devs) {
+        if (!d.dev) continue;
         DIJOYSTATE2 st = {};
         d.dev->Acquire();
         d.dev->Poll();
@@ -310,7 +331,7 @@ void pollJoysticks() {
         if (!pressed.empty()) live += W(d.name) + L" : " + pressed + L"\r\n";
     }
     if (live.empty()) live = g_devs.empty() ? L"Aucun joystick détecté (branche-le puis clique « Rescanner »)."
-                                            : L"Test : appuie sur un bouton de ton HOTAS, il s'affiche ici.";
+                                            : L"Détection en cours : appuie sur un bouton de ton HOTAS.";
     if (live != g_liveShown) {
         g_liveShown = live;
         setText(ID_LIVE, live);
@@ -580,7 +601,7 @@ void build() {
     button(L"Détecter…", 310, 131, 90, ID_BTNDETECT);
     button(L"Aucun", 406, 131, 80, ID_BTNNONE);
     make(L"STATIC", L"", SS_LEFT | WS_BORDER, 24, 166, 552, 52, ID_LIVE);
-    make(L"STATIC", L"Choisir le bouton : clique « Détecter… » puis appuie sur le bouton de ton HOTAS (il est lu sans gêner MSFS). "
+    make(L"STATIC", L"Choisir le bouton : clique « Détecter… » puis appuie sur le bouton de ton HOTAS (il n'est lu que pendant la détection). "
          L"La touche : clique « Définir… » puis appuie sur la touche (Échap annule).",
          SS_LEFT, 24, 224, 552, 44, ID_HINT);
 
@@ -713,6 +734,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (!again) {
                         g_detectFor = target;
                         setText(target == 1 ? ID_BTNDETECT : ID_EDBTNDETECT, L"Annuler");
+                        openDevices();
                         for (Dev& d : g_devs) std::fill(std::begin(d.down), std::end(d.down), true);  // ignore ce qui est deja enfonce
                         showHint(g_devs.empty() ? L"Aucun joystick détecté : branche-le puis clique « Rescanner » (onglet Général)."
                                                 : L"Appuie maintenant sur le bouton voulu de ton joystick / HOTAS…");
@@ -825,7 +847,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     ovz::ensureConfigFile();
     loadIntoUi();
     scanDevices();
-    showHint(L"Choisir le bouton : clique « Détecter… » puis appuie sur le bouton de ton HOTAS (il est lu sans gêner MSFS). "
+    stopDetect();
+    showHint(L"Choisir le bouton : clique « Détecter… » puis appuie sur le bouton de ton HOTAS (il n'est lu que pendant la détection). "
              L"La touche : clique « Définir… » puis appuie sur la touche (Échap annule).");
     for (int vk = 0; vk < 256; vk++) g_keyPrev[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0;
     SetTimer(g_wnd, kTimer, 40, nullptr);

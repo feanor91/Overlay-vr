@@ -162,6 +162,7 @@ struct State {
     };
     std::vector<Joy> joys;
     ULONGLONG lastEnum = 0;
+    std::string joyFilter;  // filtre avec lequel g.joys a ete ouvert
 } g;
 
 // --- reglages et zones (rechargees a chaud) -----------------------------------------------------
@@ -630,6 +631,12 @@ void pollToggleKey() {
 }
 
 BOOL CALLBACK enumJoystick(const DIDEVICEINSTANCEW* inst, void*) {
+    {  // on n'ouvre que le peripherique voulu : les autres (HOTAS, palonnier...) ne sont jamais touches par la couche
+        const std::string wanted = ovz::lowered(g.cfg.toggleJoystick);
+        char pn[260] = {};
+        WideCharToMultiByte(CP_UTF8, 0, inst->tszProductName, -1, pn, sizeof pn - 1, nullptr, nullptr);
+        if (!wanted.empty() && ovz::lowered(pn).find(wanted) == std::string::npos) return DIENUM_CONTINUE;
+    }
     IDirectInputDevice8W* dev = nullptr;
     if (FAILED(g.di->CreateDevice(inst->guidInstance, &dev, nullptr))) return DIENUM_CONTINUE;
     if (FAILED(dev->SetDataFormat(&c_dfDIJoystick2)) ||
@@ -666,6 +673,11 @@ void pollToggleJoystick() {
             return;
         }
         g.diWindow = CreateWindowExW(0, L"STATIC", L"OverlayVR", 0, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr);
+        g.lastEnum = 0;
+    }
+    if (g.joyFilter != g.cfg.toggleJoystick) {  // reglage change : on rouvre uniquement le bon peripherique
+        closeJoysticks();
+        g.joyFilter = g.cfg.toggleJoystick;
         g.lastEnum = 0;
     }
     if (g.joys.empty()) {
